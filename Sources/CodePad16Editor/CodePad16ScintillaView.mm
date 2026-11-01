@@ -14,6 +14,8 @@
 
 @implementation CodePad16ScintillaView
 
+@synthesize wordWrap = _wordWrap;
+
 - (instancetype)initWithFrame:(NSRect)frame {
     self = [super initWithFrame:frame];
     if (self) {
@@ -51,6 +53,14 @@
 - (void)setKeywordSets:(NSArray<NSString *> *)keywordSets {
     _keywordSets = [keywordSets copy];
     [self configureKeywords];
+}
+
+/// Scintilla wraps at word boundaries to the view width. While wrapping is on
+/// it hides the horizontal scroll bar, so long lines no longer need one.
+- (void)setWordWrap:(BOOL)wordWrap {
+    if (_wordWrap == wordWrap) return;
+    _wordWrap = wordWrap;
+    [self.editor message:SCI_SETWRAPMODE wParam:(wordWrap ? SC_WRAP_WORD : SC_WRAP_NONE) lParam:0];
 }
 
 - (void)configureEditor {

@@ -37,6 +37,7 @@ struct LanguageMode: Identifiable, Hashable {
 struct CodePad16App: App {
     @StateObject private var store = EditorStore()
     @StateObject private var appearance = AppearanceSettings()
+    @StateObject private var options = EditorOptions()
     @StateObject private var tools = ToolRunner()
     @NSApplicationDelegateAdaptor(CodePad16AppDelegate.self) private var appDelegate
 
@@ -45,6 +46,7 @@ struct CodePad16App: App {
             CodePad16Window(appDelegate: appDelegate)
                 .environmentObject(store)
                 .environmentObject(appearance)
+                .environmentObject(options)
                 .environmentObject(tools)
                 .frame(minWidth: 760, minHeight: 500)
         }
@@ -416,6 +418,7 @@ struct CodePad16Window: View {
     let appDelegate: CodePad16AppDelegate
     @EnvironmentObject private var store: EditorStore
     @EnvironmentObject private var appearance: AppearanceSettings
+    @EnvironmentObject private var options: EditorOptions
     @EnvironmentObject private var tools: ToolRunner
     @Environment(\.openWindow) private var openWindow
     @StateObject private var windowState = WindowState()
@@ -457,7 +460,7 @@ struct CodePad16Window: View {
     private var editorContent: some View {
         if let document = store.activeDocument {
             VStack(spacing: 0) {
-                EditorPane(document: document, controller: editorController)
+                EditorPane(document: document, controller: editorController, wordWrap: options.wordWrap)
                 StatusBar(document: document, controller: editorController)
             }
             .frame(minWidth: 400, maxWidth: .infinity, maxHeight: .infinity)
@@ -486,6 +489,14 @@ struct CodePad16Window: View {
                 .keyboardShortcut("f", modifiers: .command)
             Button { tools.isPanelVisible.toggle() } label: { Label("Tools", systemImage: "sparkles") }
                 .help(tools.isPanelVisible ? "Hide tool runner" : "Show tool runner")
+            Menu {
+                Toggle("Word Wrap", isOn: $options.wordWrap)
+            } label: {
+                Label("Editor", systemImage: "textformat")
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("Editor options")
             Divider().frame(height: 18)
             Menu {
                 ForEach(AppearanceMode.allCases) { mode in
@@ -699,13 +710,15 @@ struct DocumentTab: View {
 struct EditorPane: View {
     @ObservedObject var document: EditorDocument
     let controller: EditorController
+    let wordWrap: Bool
 
     var body: some View {
         NativeTextEditor(
             text: $document.text,
             document: document,
             mode: document.languageMode,
-            controller: controller
+            controller: controller,
+            wordWrap: wordWrap
         )
         .accessibilityLabel("Text editor")
     }
@@ -765,6 +778,7 @@ struct NativeTextEditor: NSViewRepresentable {
     /// Not observed: the coordinator pushes cursor updates, and observing the
     /// controller here would re-run this view on every caret move.
     let controller: EditorController
+    let wordWrap: Bool
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -772,6 +786,7 @@ struct NativeTextEditor: NSViewRepresentable {
         let editor = CodePad16ScintillaView(frame: .zero)
         editor.lexerName = mode.lexer
         editor.keywordSets = mode.keywords
+        editor.wordWrap = wordWrap
         editor.text = text
         context.coordinator.loadedDocumentID = document.id
         context.coordinator.lastText = text
@@ -822,6 +837,7 @@ struct NativeTextEditor: NSViewRepresentable {
 
         if editor.lexerName != mode.lexer { editor.lexerName = mode.lexer }
         if editor.keywordSets != mode.keywords { editor.keywordSets = mode.keywords }
+        if editor.wordWrap != wordWrap { editor.wordWrap = wordWrap }
     }
 
     final class Coordinator: NSObject {
