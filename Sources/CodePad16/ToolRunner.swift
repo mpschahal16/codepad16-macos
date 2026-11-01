@@ -22,6 +22,16 @@ struct ToolPreset: Identifiable, Hashable {
     static var all: [ToolPreset] { builtIns + [custom] }
 }
 
+/// The streamed answer and step log. Kept apart from `ToolRunner` so the fast
+/// output updates only invalidate the panel, not the whole window.
+@MainActor
+final class ToolOutput: ObservableObject {
+    @Published fileprivate(set) var response = ""
+    @Published fileprivate(set) var activity = ""
+
+    var isEmpty: Bool { response.isEmpty && activity.isEmpty }
+}
+
 /// Runs an external command, streams its output, and keeps the panel state.
 ///
 /// Standard output is treated as the tool's answer, and standard error as its
@@ -40,9 +50,8 @@ final class ToolRunner: ObservableObject {
         didSet { defaults.set(includeContext, forKey: Keys.includeContext) }
     }
     @Published var prompt = ""
-    @Published private(set) var response = ""
-    @Published private(set) var activity = ""
     @Published private(set) var isRunning = false
+    let output = ToolOutput()
 
     private enum Keys {
         static let tool = "toolRunner.selectedTool"
@@ -55,6 +64,11 @@ final class ToolRunner: ObservableObject {
     private var stdoutHandle: FileHandle?
     private var stderrHandle: FileHandle?
     private var wasCancelled = false
+    /// Output arrives in many small chunks. Chunks are buffered and published at
+    /// most once per frame instead of re-laying out the panes per chunk.
+    private var pendingResponse = ""
+    private var pendingActivity = ""
+    private var flushTask: Task<Void, Never>?
 
     init() {
         selectedToolID = defaults.string(forKey: Keys.tool) ?? ToolPreset.builtIns[0].id
@@ -78,8 +92,6 @@ final class ToolRunner: ObservableObject {
         return hasPrompt || !template.contains("{prompt}")
     }
 
-    var hasOutput: Bool { !response.isEmpty || !activity.isEmpty }
-
     func run(fileURL: URL?, selection: String) {
         guard canRun else { return }
 
@@ -88,11 +100,16 @@ final class ToolRunner: ObservableObject {
         let command = makeCommand(fileURL: fileURL, selection: selection, directory: directory)
 
         stopStreams()
-        response = ""
-        activity = ""
+        flushTask?.cancel()
+        flushTask = nil
+        pendingResponse.removeAll()
+        pendingActivity.removeAll()
+        output.response = ""
+        output.activity = ""
         isRunning = true
         wasCancelled = false
         appendActivity("Running \(selectedPreset.name)…\n")
+        flushPendingOutput()
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
@@ -102,6 +119,15 @@ final class ToolRunner: ObservableObject {
         process.arguments = ["-lic", command]
         process.currentDirectoryURL = directory
         process.standardInput = FileHandle.nullDevice
+        // The app may have been launched from a terminal, and zsh's
+        // /etc/zshrc_Apple_Terminal prints "Restored session: …" to stdout when
+        // it sees those variables. They mean nothing to a child process here,
+        // and the stray line would land in the answer pane.
+        var environment = ProcessInfo.processInfo.environment
+        environment.removeValue(forKey: "TERM_PROGRAM")
+        environment.removeValue(forKey: "TERM_PROGRAM_VERSION")
+        environment.removeValue(forKey: "TERM_SESSION_ID")
+        process.environment = environment
 
         let outPipe = Pipe()
         let errPipe = Pipe()
@@ -151,6 +177,8 @@ final class ToolRunner: ObservableObject {
                 } else {
                     self.appendActivity("\n[finished]\n")
                 }
+                // Publish whatever is still buffered before the run is done.
+                self.flushPendingOutput(final: true)
             }
         }
 
@@ -176,8 +204,12 @@ final class ToolRunner: ObservableObject {
 
     func clearOutput() {
         guard !isRunning else { return }
-        response = ""
-        activity = ""
+        flushTask?.cancel()
+        flushTask = nil
+        pendingResponse.removeAll()
+        pendingActivity.removeAll()
+        output.response = ""
+        output.activity = ""
     }
 
     private func stopStreams() {
@@ -206,22 +238,83 @@ final class ToolRunner: ObservableObject {
     }
 
     private func appendResponse(_ chunk: String) {
-        response = Self.capped(response + Self.cleaned(chunk), limit: 500_000)
+        pendingResponse += chunk
+        scheduleFlush()
     }
 
     private func appendActivity(_ chunk: String) {
-        activity = Self.capped(activity + Self.cleaned(chunk), limit: 200_000)
+        pendingActivity += chunk
+        scheduleFlush()
+    }
+
+    private func scheduleFlush() {
+        guard flushTask == nil else { return }
+        flushTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 40_000_000)
+            guard let self else { return }
+            self.flushTask = nil
+            // A pipe can deliver its last bytes after the process terminated,
+            // so treat flushes after that point as final to release any CR
+            // held back for a possible CRLF split.
+            self.flushPendingOutput(final: !self.isRunning)
+        }
+    }
+
+    private func flushPendingOutput(final: Bool = false) {
+        flushTask?.cancel()
+        flushTask = nil
+        flushPending(&pendingResponse, final: final) { text in
+            self.output.response = Self.capped(self.output.response + text, limit: 200_000)
+        }
+        flushPending(&pendingActivity, final: final) { text in
+            self.output.activity = Self.capped(self.output.activity + text, limit: 60_000)
+        }
+    }
+
+    /// Cleans and appends one buffer. Unless this is the final flush, a trailing
+    /// carriage return is held back: it may be the first half of a CRLF pair
+    /// split across two reads, and normalizing the pair together avoids a
+    /// doubled newline.
+    private func flushPending(
+        _ pending: inout String,
+        final: Bool,
+        append: (String) -> Void
+    ) {
+        var body = pending
+        var carry = ""
+        if !final, body.hasSuffix("\r") {
+            body.removeLast()
+            carry = "\r"
+        }
+        pending = carry
+        guard !body.isEmpty else { return }
+        append(Self.cleaned(body))
     }
 
     private static func capped(_ text: String, limit: Int) -> String {
-        guard text.count > limit else { return text }
-        return String(text.suffix(limit * 4 / 5))
+        // Counting UTF-8 units is constant time for a native string, while
+        // `String.count` walks every character.
+        guard text.utf8.count > limit else { return text }
+        // Drop well below the limit so trimming happens roughly once per
+        // hundred thousand new bytes instead of on every flush.
+        return String(text.suffix(limit / 2))
     }
 
     private static func cleaned(_ chunk: String) -> String {
-        strippingANSI(chunk)
-            .replacingOccurrences(of: "\r\n", with: "\n")
-            .replacingOccurrences(of: "\r", with: "\n")
+        var text = chunk
+        // Control characters are not grapheme clusters, but checking scalars
+        // keeps this correct for any input the stream can produce.
+        if text.unicodeScalars.contains("\u{001B}") {
+            text = strippingANSI(text)
+        }
+        // `"\r\n"` is a single Character in Swift, so `text.contains("\r")`
+        // would be false for CRLF text and the cleanup below would never run.
+        if text.unicodeScalars.contains("\r") {
+            text = text
+                .replacingOccurrences(of: "\r\n", with: "\n")
+                .replacingOccurrences(of: "\r", with: "\n")
+        }
+        return text
     }
 
     private static let ansiPattern = try! NSRegularExpression(

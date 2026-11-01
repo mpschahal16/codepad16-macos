@@ -2,8 +2,10 @@ import SwiftUI
 
 struct ToolRunnerPanel: View {
     @EnvironmentObject private var tools: ToolRunner
-    @ObservedObject var controller: EditorController
+    /// Not observed: the controller is only read when a prompt is submitted.
+    let controller: EditorController
     let document: EditorDocument?
+    @ObservedObject var output: ToolOutput
 
     var body: some View {
         VStack(spacing: 0) {
@@ -16,7 +18,7 @@ struct ToolRunnerPanel: View {
             VSplitView {
                 outputPane(
                     title: "Response",
-                    text: tools.response,
+                    text: output.response,
                     placeholder: "The tool's answer appears here.",
                     monospaced: false
                 )
@@ -24,7 +26,7 @@ struct ToolRunnerPanel: View {
 
                 outputPane(
                     title: "Processing",
-                    text: tools.activity,
+                    text: output.activity,
                     placeholder: "Steps, progress, and errors appear here.",
                     monospaced: true
                 )
@@ -56,7 +58,7 @@ struct ToolRunnerPanel: View {
                 Image(systemName: "eraser")
             }
             .buttonStyle(.borderless)
-            .disabled(tools.isRunning || !tools.hasOutput)
+            .disabled(tools.isRunning || output.isEmpty)
             .help("Clear response and processing")
 
             Button { tools.isPanelVisible = false } label: {

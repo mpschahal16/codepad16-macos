@@ -181,13 +181,27 @@
 
 - (void)notification:(SCNotification *)notification {
     if (!self.onChange) return;
-    if (notification->nmhdr.code != SCN_MODIFIED && notification->nmhdr.code != SCN_UPDATEUI &&
-        notification->nmhdr.code != SCN_SAVEPOINTREACHED && notification->nmhdr.code != SCN_SAVEPOINTLEFT) return;
+
+    int code = notification->nmhdr.code;
+    BOOL edited = NO;
+    if (code == SCN_MODIFIED) {
+        // Style, fold, and other bookkeeping notifications also arrive here;
+        // only copy the buffer when text was actually inserted or deleted.
+        int textChange = SC_MOD_INSERTTEXT | SC_MOD_DELETETEXT;
+        if ((notification->modificationType & textChange) == 0) return;
+        edited = YES;
+    } else if (code != SCN_UPDATEUI && code != SCN_SAVEPOINTREACHED && code != SCN_SAVEPOINTLEFT) {
+        return;
+    }
+
     NSInteger position = (NSInteger)[self.editor message:SCI_GETCURRENTPOS];
     NSInteger line = (NSInteger)[self.editor message:SCI_LINEFROMPOSITION wParam:position] + 1;
     NSInteger column = (NSInteger)[self.editor message:SCI_GETCOLUMN wParam:position] + 1;
     BOOL modified = [self.editor message:SCI_GETMODIFY] != 0;
-    self.onChange(self.text, line, column, modified);
+    NSInteger lineCount = (NSInteger)[self.editor message:SCI_GETLINECOUNT];
+    // Passing nil for cursor-only updates avoids copying the whole document
+    // on every caret move, selection change, and scroll.
+    self.onChange(edited ? self.text : nil, line, column, modified, lineCount);
 }
 
 - (NSRange)selection {

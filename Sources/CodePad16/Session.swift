@@ -41,7 +41,8 @@ enum SessionStore {
                 withIntermediateDirectories: true
             )
             let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            // The file is machine-managed; compact output is faster to write
+            // and keeps large unsaved buffers from bloating it.
             try encoder.encode(state).write(to: url, options: .atomic)
         } catch {
             NSLog("CodePad16 could not save the session: %@", error.localizedDescription)

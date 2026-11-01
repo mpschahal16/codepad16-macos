@@ -121,10 +121,13 @@ final class EditorDocument: ObservableObject, Identifiable {
     @Published var isDirty = false
     @Published var languageMode: LanguageMode
     @Published var encoding: TextEncoding
-    var url: URL?
+    @Published var url: URL?
     /// Last caret offset and scroll position, updated while the document is shown.
     var caretPosition = 0
     var firstVisibleLine = 0
+    /// Line count as reported by the editor, so the status bar does not have to
+    /// rescan the whole document whenever the view updates.
+    @Published var lineCount: Int
     private var savedText: String
 
     init(
@@ -138,11 +141,12 @@ final class EditorDocument: ObservableObject, Identifiable {
         self.url = url
         self.encoding = encoding
         self.languageMode = languageMode ?? LanguageMode.detect(url: url)
+        self.lineCount = Self.countLines(in: text)
     }
 
     var title: String { url?.lastPathComponent ?? "Untitled" }
     var displayPath: String { url.map { ($0.path as NSString).abbreviatingWithTildeInPath } ?? "Unsaved" }
-    var lineCount: Int { max(1, text.reduce(into: 1) { if $1 == "\n" { $0 += 1 } }) }
+
     func markSaved(at newURL: URL? = nil) {
         if let newURL, url != newURL {
             url = newURL
@@ -150,6 +154,12 @@ final class EditorDocument: ObservableObject, Identifiable {
         }
         savedText = text
         isDirty = false
+    }
+
+    private static func countLines(in text: String) -> Int {
+        var lines = 1
+        for byte in text.utf8 where byte == 0x0A { lines += 1 }
+        return lines
     }
 }
 
@@ -421,13 +431,17 @@ struct CodePad16Window: View {
             HSplitView {
                 editorContent
                 if tools.isPanelVisible {
-                    ToolRunnerPanel(controller: editorController, document: store.activeDocument)
+                    ToolRunnerPanel(
+                        controller: editorController,
+                        document: store.activeDocument,
+                        output: tools.output
+                    )
                         .frame(minWidth: 300, idealWidth: 380, maxWidth: 620)
                 }
             }
         }
         .background(Color(nsColor: .textBackgroundColor))
-        .navigationTitle(windowTitle)
+        .modifier(WindowTitleModifier(document: store.activeDocument))
         .onAppear {
             appearance.apply()
             appDelegate.reopenWindow = { openWindow(id: "main") }
@@ -444,7 +458,7 @@ struct CodePad16Window: View {
         if let document = store.activeDocument {
             VStack(spacing: 0) {
                 EditorPane(document: document, controller: editorController)
-                statusBar(document)
+                StatusBar(document: document, controller: editorController)
             }
             .frame(minWidth: 400, maxWidth: .infinity, maxHeight: .infinity)
         } else {
@@ -454,11 +468,6 @@ struct CodePad16Window: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-    }
-
-    private var windowTitle: String {
-        guard let document = store.activeDocument else { return "CodePad16" }
-        return "\(document.title) - CodePad16"
     }
 
     private var header: some View {
@@ -560,7 +569,35 @@ struct CodePad16Window: View {
         .overlay(alignment: .bottom) { Divider() }
     }
 
-    private func statusBar(_ document: EditorDocument) -> some View {
+}
+
+/// The window title follows the active document and updates when it is renamed.
+private struct WindowTitleModifier: ViewModifier {
+    let document: EditorDocument?
+
+    func body(content: Content) -> some View {
+        if let document {
+            content.modifier(LiveTitleModifier(document: document))
+        } else {
+            content.navigationTitle("CodePad16")
+        }
+    }
+}
+
+private struct LiveTitleModifier: ViewModifier {
+    @ObservedObject var document: EditorDocument
+
+    func body(content: Content) -> some View {
+        content.navigationTitle("\(document.title) - CodePad16")
+    }
+}
+
+/// Observes only the document, so typing does not rebuild the whole window.
+struct StatusBar: View {
+    @ObservedObject var document: EditorDocument
+    let controller: EditorController
+
+    var body: some View {
         HStack(spacing: 14) {
             Menu {
                 ForEach(LanguageMode.all) { mode in
@@ -603,9 +640,7 @@ struct CodePad16Window: View {
                 .truncationMode(.middle)
                 .layoutPriority(1)
                 .help(document.url?.path ?? "This document has not been saved yet")
-            Text("Ln: \(editorController.cursorLine), Col: \(editorController.cursorColumn)")
-                .monospacedDigit()
-                .help("Current line and column")
+            CursorReadout(controller: controller)
         }
         .font(.system(size: 11))
         .foregroundStyle(.secondary)
@@ -613,6 +648,17 @@ struct CodePad16Window: View {
         .padding(.vertical, 7)
         .background(Color(nsColor: .windowBackgroundColor))
         .overlay(alignment: .top) { Divider() }
+    }
+}
+
+/// Isolated so caret movement only invalidates this label.
+struct CursorReadout: View {
+    @ObservedObject var controller: EditorController
+
+    var body: some View {
+        Text("Ln: \(controller.cursorLine), Col: \(controller.cursorColumn)")
+            .monospacedDigit()
+            .help("Current line and column")
     }
 }
 
@@ -652,7 +698,7 @@ struct DocumentTab: View {
 
 struct EditorPane: View {
     @ObservedObject var document: EditorDocument
-    @ObservedObject var controller: EditorController
+    let controller: EditorController
 
     var body: some View {
         NativeTextEditor(
@@ -678,8 +724,12 @@ final class EditorController: ObservableObject {
     @Published private(set) var cursorColumn = 1
 
     func updateCursorPosition(line: Int, column: Int) {
-        cursorLine = max(1, line)
-        cursorColumn = max(1, column)
+        let newLine = max(1, line)
+        let newColumn = max(1, column)
+        // Only publish when the position actually changes, so holding an arrow
+        // key does not invalidate views that show the same value.
+        if newLine != cursorLine { cursorLine = newLine }
+        if newColumn != cursorColumn { cursorColumn = newColumn }
     }
 
     func captureState(into document: EditorDocument) {
@@ -712,7 +762,9 @@ struct NativeTextEditor: NSViewRepresentable {
     @Binding var text: String
     let document: EditorDocument
     let mode: LanguageMode
-    @ObservedObject var controller: EditorController
+    /// Not observed: the coordinator pushes cursor updates, and observing the
+    /// controller here would re-run this view on every caret move.
+    let controller: EditorController
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -722,13 +774,20 @@ struct NativeTextEditor: NSViewRepresentable {
         editor.keywordSets = mode.keywords
         editor.text = text
         context.coordinator.loadedDocumentID = document.id
+        context.coordinator.lastText = text
         context.coordinator.restoreViewState(
             caretPosition: document.caretPosition,
             firstVisibleLine: document.firstVisibleLine,
             in: editor
         )
-        editor.onChange = { [weak coordinator = context.coordinator] editedText, line, column, _ in
-            coordinator?.editorDidChange(text: editedText, line: line, column: column)
+        editor.onChange = { [weak coordinator = context.coordinator] editedText, line, column, modified, lineCount in
+            coordinator?.editorDidChange(
+                text: editedText,
+                line: line,
+                column: column,
+                modified: modified,
+                lineCount: lineCount
+            )
         }
         controller.scintillaView = editor
         return editor
@@ -739,21 +798,28 @@ struct NativeTextEditor: NSViewRepresentable {
         // The view is reused when the active tab changes, so the callback must follow
         // the current binding instead of the document that created the view.
         coordinator.parent = self
-        let documentChanged = coordinator.loadedDocumentID != document.id
+        controller.scintillaView = editor
+
         coordinator.isUpdatingFromView = true
         defer { coordinator.isUpdatingFromView = false }
-        controller.scintillaView = editor
-        if documentChanged || editor.text != text {
+
+        if coordinator.loadedDocumentID != document.id {
             editor.text = text
-            if documentChanged {
-                coordinator.loadedDocumentID = document.id
-                coordinator.restoreViewState(
-                    caretPosition: document.caretPosition,
-                    firstVisibleLine: document.firstVisibleLine,
-                    in: editor
-                )
-            }
+            coordinator.lastText = text
+            coordinator.loadedDocumentID = document.id
+            coordinator.resetStatusCache()
+            coordinator.restoreViewState(
+                caretPosition: document.caretPosition,
+                firstVisibleLine: document.firstVisibleLine,
+                in: editor
+            )
+        } else if coordinator.lastText != text {
+            // The text changed somewhere other than the editor, such as a
+            // restored session or an encoding change.
+            editor.text = text
+            coordinator.lastText = text
         }
+
         if editor.lexerName != mode.lexer { editor.lexerName = mode.lexer }
         if editor.keywordSets != mode.keywords { editor.keywordSets = mode.keywords }
     }
@@ -762,8 +828,24 @@ struct NativeTextEditor: NSViewRepresentable {
         var parent: NativeTextEditor
         var isUpdatingFromView = false
         var loadedDocumentID: UUID?
+        /// The text the editor and the binding last agreed on. Comparing
+        /// against this avoids reading the whole Scintilla buffer on every
+        /// SwiftUI update.
+        var lastText: String?
+        /// Last reported status, so redundant notifications do not schedule work.
+        private var lastLine = -1
+        private var lastColumn = -1
+        private var lastLineCount = -1
 
         init(_ parent: NativeTextEditor) { self.parent = parent }
+
+        /// Forces the next notification to be reported, used when the view
+        /// starts showing a different document.
+        func resetStatusCache() {
+            lastLine = -1
+            lastColumn = -1
+            lastLineCount = -1
+        }
 
         /// Applies the saved caret and scroll position. The scroll position only
         /// takes effect once the view has a size, so it is applied again on the
@@ -782,15 +864,34 @@ struct NativeTextEditor: NSViewRepresentable {
             }
         }
 
-        func editorDidChange(text editedText: String, line: Int, column: Int) {
+        func editorDidChange(
+            text editedText: String?,
+            line: Int,
+            column: Int,
+            modified: Bool,
+            lineCount: Int
+        ) {
             // Notifications fired while loading a document (text or lexer assignment)
             // describe the old contents and must not overwrite the incoming document.
             guard !isUpdatingFromView else { return }
-            if parent.text != editedText {
+            if let editedText, parent.text != editedText {
+                lastText = editedText
                 parent.text = editedText
             }
+            // Scintilla sends updates that change nothing, such as a repaint of
+            // the same caret. Skip those instead of scheduling a hop per event.
+            guard line != lastLine || column != lastColumn || lineCount != lastLineCount else {
+                return
+            }
+            lastLine = line
+            lastColumn = column
+            lastLineCount = lineCount
+            let document = parent.document
             let controller = parent.controller
-            DispatchQueue.main.async {
+            Task { @MainActor in
+                if document.lineCount != lineCount {
+                    document.lineCount = lineCount
+                }
                 controller.updateCursorPosition(line: line, column: column)
             }
         }
