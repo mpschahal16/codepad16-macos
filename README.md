@@ -14,6 +14,7 @@ A small, native macOS text and code editor prototype for Apple Silicon. It is an
 - Multiple open documents in tabs
 - New, open, save, and save as
 - Open a saved file in another application or reveal it in Finder from the File menu or a tab's context menu
+- A tool runner panel for OpenCode, Claude Code, Codex, Gemini CLI, or a custom command, with the active file and selection as context
 - UTF-8, UTF-16, UTF-32, and ISO-8859-1 text files, detected on open and preserved on save
 - Native Find interface (`⌘F`)
 - Syntax highlighting and automatic language detection for C, C++, C#, Java, JavaScript, TypeScript, Python, Swift, HTML, CSS, JSON, XML, and SQL
@@ -46,6 +47,17 @@ To package the built app as a drag-to-Applications disk image, run:
 ```
 
 This creates `dist/CodePad16-macOS-arm64.dmg`. Build the app first with `./scripts/build-app.sh` if `dist/CodePad16.app` is missing.
+
+## Tool runner
+
+The sparkles button in the header, or **View → Show Tool Runner**, opens a side panel that runs a command-line agent against the active document. Presets are included for OpenCode, Claude Code, Codex, and Gemini CLI, plus a custom command.
+
+- Commands run through your interactive login shell (`zsh -lic`), the same way your terminal would, so tools installed per-user and added to `PATH` in `~/.zshrc` are found.
+- Press **Return** to run; **Shift-Return** adds a newline to the prompt. The prompt clears once the command starts.
+- The panel separates the tool's answer in **Response** from its step log and errors in **Processing**. Standard output is treated as the answer and standard error as progress, which is how OpenCode and most agent CLIs report their work.
+- Use **Stop** to terminate the command, and the eraser button to clear both panes.
+- **Include file and selection** adds the active file path and any selected text to the prompt.
+- Custom commands can use `{prompt}`, `{file}`, `{selection}`, and `{directory}` placeholders. Values are shell-quoted before substitution.
 
 ## How the Notepad++ source informed the design
 

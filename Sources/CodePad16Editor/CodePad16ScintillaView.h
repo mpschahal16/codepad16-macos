@@ -12,6 +12,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)find:(NSString *)query backwards:(BOOL)backwards;
 @property(nonatomic, readonly) NSInteger caretPosition;
 @property(nonatomic, readonly) NSInteger firstVisibleLine;
+@property(nonatomic, readonly) NSString *selectedText;
 - (void)setCaretPosition:(NSInteger)position;
 - (void)setFirstVisibleLine:(NSInteger)line;
 @end

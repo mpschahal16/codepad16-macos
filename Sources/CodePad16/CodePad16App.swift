@@ -37,6 +37,7 @@ struct LanguageMode: Identifiable, Hashable {
 struct CodePad16App: App {
     @StateObject private var store = EditorStore()
     @StateObject private var appearance = AppearanceSettings()
+    @StateObject private var tools = ToolRunner()
     @NSApplicationDelegateAdaptor(CodePad16AppDelegate.self) private var appDelegate
 
     var body: some Scene {
@@ -44,6 +45,7 @@ struct CodePad16App: App {
             CodePad16Window(appDelegate: appDelegate)
                 .environmentObject(store)
                 .environmentObject(appearance)
+                .environmentObject(tools)
                 .frame(minWidth: 760, minHeight: 500)
         }
         .commands {
@@ -52,6 +54,10 @@ struct CodePad16App: App {
                     ForEach(AppearanceMode.allCases) { mode in
                         Label(mode.title, systemImage: mode.symbolName).tag(mode)
                     }
+                }
+                Divider()
+                Button(tools.isPanelVisible ? "Hide Tool Runner" : "Show Tool Runner") {
+                    tools.isPanelVisible.toggle()
                 }
             }
             CommandGroup(replacing: .newItem) {
@@ -400,6 +406,7 @@ struct CodePad16Window: View {
     let appDelegate: CodePad16AppDelegate
     @EnvironmentObject private var store: EditorStore
     @EnvironmentObject private var appearance: AppearanceSettings
+    @EnvironmentObject private var tools: ToolRunner
     @Environment(\.openWindow) private var openWindow
     @StateObject private var windowState = WindowState()
     @StateObject private var editorController = EditorController()
@@ -411,15 +418,12 @@ struct CodePad16Window: View {
             if windowState.showFind {
                 findBar
             }
-            if let document = store.activeDocument {
-                EditorPane(document: document, controller: editorController)
-                statusBar(document)
-            } else {
-                VStack(spacing: 10) {
-                    Image(systemName: "doc.text").font(.system(size: 28)).foregroundStyle(.secondary)
-                    Text("No document open").foregroundStyle(.secondary)
+            HSplitView {
+                editorContent
+                if tools.isPanelVisible {
+                    ToolRunnerPanel(controller: editorController, document: store.activeDocument)
+                        .frame(minWidth: 300, idealWidth: 380, maxWidth: 620)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .background(Color(nsColor: .textBackgroundColor))
@@ -432,6 +436,23 @@ struct CodePad16Window: View {
                 guard let store, let document = store.activeDocument else { return }
                 editorController.captureState(into: document)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var editorContent: some View {
+        if let document = store.activeDocument {
+            VStack(spacing: 0) {
+                EditorPane(document: document, controller: editorController)
+                statusBar(document)
+            }
+            .frame(minWidth: 400, maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            VStack(spacing: 10) {
+                Image(systemName: "doc.text").font(.system(size: 28)).foregroundStyle(.secondary)
+                Text("No document open").foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
@@ -454,6 +475,8 @@ struct CodePad16Window: View {
                 .keyboardShortcut("s", modifiers: .command)
             Button { windowState.showFind.toggle() } label: { Label("Find", systemImage: "magnifyingglass") }
                 .keyboardShortcut("f", modifiers: .command)
+            Button { tools.isPanelVisible.toggle() } label: { Label("Tools", systemImage: "sparkles") }
+                .help(tools.isPanelVisible ? "Hide tool runner" : "Show tool runner")
             Divider().frame(height: 18)
             Menu {
                 ForEach(AppearanceMode.allCases) { mode in
@@ -667,6 +690,8 @@ final class EditorController: ObservableObject {
 
     func findNext(_ query: String) { scintillaView?.find(query, backwards: false) }
     func findPrevious(_ query: String) { scintillaView?.find(query, backwards: true) }
+
+    var selectedText: String { scintillaView?.selectedText ?? "" }
 
     func matchCount(_ query: String, in text: String) -> Int {
         guard !query.isEmpty else { return 0 }

@@ -222,6 +222,17 @@
     return (NSInteger)[self.editor message:SCI_GETFIRSTVISIBLELINE];
 }
 
+- (NSString *)selectedText {
+    NSInteger start = (NSInteger)[self.editor message:SCI_GETSELECTIONSTART];
+    NSInteger end = (NSInteger)[self.editor message:SCI_GETSELECTIONEND];
+    if (end <= start) return @"";
+    NSUInteger length = (NSUInteger)(end - start);
+    NSMutableData *buffer = [NSMutableData dataWithLength:length + 1];
+    [self.editor message:SCI_GETSELTEXT wParam:0 lParam:(sptr_t)buffer.mutableBytes];
+    NSString *text = [NSString stringWithUTF8String:(const char *)buffer.bytes];
+    return text ?: @"";
+}
+
 - (void)setFirstVisibleLine:(NSInteger)line {
     if (line < 0) return;
     [self.editor message:SCI_SETFIRSTVISIBLELINE wParam:line lParam:0];
