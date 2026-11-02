@@ -4,7 +4,7 @@ A small, native macOS text and code editor prototype for Apple Silicon. It is an
 
 **[Download the latest release](https://github.com/mpschahal16/codepad16-macos/releases/latest)** for Apple Silicon macOS.
 
-![CodePad16 for macOS in dark mode showing Package.swift open in two tabs with syntax highlighting, a line-number gutter, and the New, Open, Save, Find, and appearance toolbar controls](Assets/preview.png)
+![CodePad16 for macOS in dark mode showing Package.swift open with syntax highlighting, a line-number gutter, the File, Search, Editor, Tools, Help, and appearance header controls, and the tool runner panel](Assets/preview.png)
 
 ## Current features
 
