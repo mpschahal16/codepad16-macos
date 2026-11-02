@@ -453,6 +453,9 @@ struct CodePad16Window: View {
         .sheet(isPresented: $windowState.showLicense) {
             LicenseView { windowState.showLicense = false }
         }
+        .sheet(isPresented: $windowState.showReleaseNotes) {
+            ReleaseNotesView { windowState.showReleaseNotes = false }
+        }
         .onAppear {
             appearance.apply()
             appDelegate.reopenWindow = { openWindow(id: "main") }
@@ -556,6 +559,7 @@ struct CodePad16Window: View {
                     NSWorkspace.shared.open(Self.latestReleaseURL)
                 }
                 Divider()
+                Button("Release Notes") { windowState.showReleaseNotes = true }
                 Button("License…") { windowState.showLicense = true }
             } label: {
                 Label("Help", systemImage: "questionmark.circle")
@@ -818,6 +822,7 @@ final class WindowState: ObservableObject {
     @Published var findQuery = ""
     @Published var showAbout = false
     @Published var showLicense = false
+    @Published var showReleaseNotes = false
 }
 
 @MainActor
