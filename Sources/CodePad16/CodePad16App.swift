@@ -479,16 +479,59 @@ struct CodePad16Window: View {
             Text("CodePad16")
                 .font(.system(size: 14, weight: .semibold))
             Spacer()
-            Button { store.newDocument() } label: { Label("New", systemImage: "doc.badge.plus") }
-                .keyboardShortcut("n", modifiers: .command)
-            Button { store.openFiles() } label: { Label("Open", systemImage: "folder") }
-                .keyboardShortcut("o", modifiers: .command)
-            Button { if let document = store.activeDocument { store.save(document) } } label: { Label("Save", systemImage: "square.and.arrow.down") }
+            Menu {
+                Button { store.newDocument() } label: { Label("New Tab", systemImage: "doc.badge.plus") }
+                    .keyboardShortcut("n", modifiers: .command)
+                Button { store.openFiles() } label: { Label("Open…", systemImage: "folder") }
+                    .keyboardShortcut("o", modifiers: .command)
+                Divider()
+                Button {
+                    if let document = store.activeDocument { store.save(document) }
+                } label: {
+                    Label("Save", systemImage: "square.and.arrow.down")
+                }
                 .keyboardShortcut("s", modifiers: .command)
-            Button { windowState.showFind.toggle() } label: { Label("Find", systemImage: "magnifyingglass") }
-                .keyboardShortcut("f", modifiers: .command)
-            Button { tools.isPanelVisible.toggle() } label: { Label("Tools", systemImage: "sparkles") }
-                .help(tools.isPanelVisible ? "Hide tool runner" : "Show tool runner")
+                .disabled(store.activeDocument == nil)
+                Button {
+                    if let document = store.activeDocument { store.saveAs(document) }
+                } label: {
+                    Label("Save As…", systemImage: "square.and.arrow.down.on.square")
+                }
+                .keyboardShortcut("s", modifiers: [.command, .shift])
+                .disabled(store.activeDocument == nil)
+                Divider()
+                Button {
+                    if let document = store.activeDocument { store.openInOtherApplication(document) }
+                } label: {
+                    Label("Open in Other Application…", systemImage: "arrow.up.forward.app")
+                }
+                .disabled(store.activeDocument == nil)
+                Button {
+                    if let document = store.activeDocument { store.revealInFinder(document) }
+                } label: {
+                    Label("Reveal in Finder", systemImage: "folder")
+                }
+                .disabled(store.activeDocument?.url == nil)
+            } label: {
+                Label("File", systemImage: "folder")
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("File actions")
+            Menu {
+                Button { windowState.showFind.toggle() } label: { Label("Find…", systemImage: "magnifyingglass") }
+                    .keyboardShortcut("f", modifiers: .command)
+                Divider()
+                Button { editorController.findNext(windowState.findQuery) } label: { Text("Find Next") }
+                    .keyboardShortcut("g", modifiers: .command)
+                Button { editorController.findPrevious(windowState.findQuery) } label: { Text("Find Previous") }
+                    .keyboardShortcut("g", modifiers: [.command, .shift])
+            } label: {
+                Label("Search", systemImage: "magnifyingglass")
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("Search actions")
             Menu {
                 Toggle("Word Wrap", isOn: $options.wordWrap)
             } label: {
@@ -497,6 +540,8 @@ struct CodePad16Window: View {
             .menuStyle(.borderlessButton)
             .fixedSize()
             .help("Editor options")
+            Button { tools.isPanelVisible.toggle() } label: { Label("Tools", systemImage: "sparkles") }
+                .help(tools.isPanelVisible ? "Hide tool runner" : "Show tool runner")
             Divider().frame(height: 18)
             Menu {
                 ForEach(AppearanceMode.allCases) { mode in
