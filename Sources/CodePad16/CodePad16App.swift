@@ -40,6 +40,7 @@ struct CodePad16App: App {
     @StateObject private var options = EditorOptions()
     @StateObject private var tools = ToolRunner()
     @StateObject private var help = HelpState()
+    @StateObject private var updates = UpdateChecker()
     @NSApplicationDelegateAdaptor(CodePad16AppDelegate.self) private var appDelegate
 
     var body: some Scene {
@@ -50,6 +51,7 @@ struct CodePad16App: App {
                 .environmentObject(options)
                 .environmentObject(tools)
                 .environmentObject(help)
+                .environmentObject(updates)
                 .frame(minWidth: 760, minHeight: 500)
         }
         .commands {
@@ -97,9 +99,7 @@ struct CodePad16App: App {
             }
             CommandGroup(replacing: .help) {
                 Button("About CodePad16") { help.showAbout = true }
-                Button("Check for Updates…") {
-                    NSWorkspace.shared.open(HelpState.latestReleaseURL)
-                }
+                Button("Check for Updates…") { updates.checkForUpdates() }
                 Divider()
                 Button("Release Notes") { help.showReleaseNotes = true }
                 Button("License…") { help.showLicense = true }
@@ -432,6 +432,7 @@ struct CodePad16Window: View {
     @EnvironmentObject private var options: EditorOptions
     @EnvironmentObject private var tools: ToolRunner
     @EnvironmentObject private var help: HelpState
+    @EnvironmentObject private var updates: UpdateChecker
     @Environment(\.openWindow) private var openWindow
     @StateObject private var windowState = WindowState()
     @StateObject private var editorController = EditorController()
@@ -465,6 +466,9 @@ struct CodePad16Window: View {
         }
         .sheet(isPresented: $help.showReleaseNotes) {
             ReleaseNotesView { help.showReleaseNotes = false }
+        }
+        .sheet(isPresented: $updates.isPresented) {
+            UpdateView(onClose: { updates.isPresented = false }, checker: updates)
         }
         .onAppear {
             appearance.apply()
@@ -565,9 +569,7 @@ struct CodePad16Window: View {
                 .help(tools.isPanelVisible ? "Hide tool runner" : "Show tool runner")
             Menu {
                 Button("About CodePad16") { help.showAbout = true }
-                Button("Check for Updates…") {
-                    NSWorkspace.shared.open(HelpState.latestReleaseURL)
-                }
+                Button("Check for Updates…") { updates.checkForUpdates() }
                 Divider()
                 Button("Release Notes") { help.showReleaseNotes = true }
                 Button("License…") { help.showLicense = true }
@@ -836,8 +838,6 @@ final class WindowState: ObservableObject {
 /// can present the same panels.
 @MainActor
 final class HelpState: ObservableObject {
-    static let latestReleaseURL = URL(string: "https://github.com/mpschahal16/codepad16-macos/releases/latest")!
-
     @Published var showAbout = false
     @Published var showLicense = false
     @Published var showReleaseNotes = false
