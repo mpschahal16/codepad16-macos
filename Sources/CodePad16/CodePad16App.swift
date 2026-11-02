@@ -522,9 +522,9 @@ struct CodePad16Window: View {
                 Button { windowState.showFind.toggle() } label: { Label("Find…", systemImage: "magnifyingglass") }
                     .keyboardShortcut("f", modifiers: .command)
                 Divider()
-                Button { editorController.findNext(windowState.findQuery) } label: { Text("Find Next") }
+                Button { findInDocument(backwards: false) } label: { Text("Find Next") }
                     .keyboardShortcut("g", modifiers: .command)
-                Button { editorController.findPrevious(windowState.findQuery) } label: { Text("Find Previous") }
+                Button { findInDocument(backwards: true) } label: { Text("Find Previous") }
                     .keyboardShortcut("g", modifiers: [.command, .shift])
             } label: {
                 Label("Search", systemImage: "magnifyingglass")
@@ -570,6 +570,28 @@ struct CodePad16Window: View {
         .overlay(alignment: .bottom) { Divider() }
     }
 
+    private func findInDocument(backwards: Bool) {
+        guard !windowState.findQuery.isEmpty else {
+            // Without a query, show the find bar so there is something to search for.
+            windowState.showFind = true
+            return
+        }
+        if backwards {
+            editorController.findPrevious(windowState.findQuery)
+        } else {
+            editorController.findNext(windowState.findQuery)
+        }
+    }
+
+    private var findStatusText: String {
+        guard !windowState.findQuery.isEmpty else { return "" }
+        let info = editorController.matchInfo(windowState.findQuery)
+        guard info.total > 0 else { return "No matches" }
+        // A selection past the last match wraps to the first one.
+        let index = info.index > 0 ? info.index : 1
+        return "\(index) of \(info.total)"
+    }
+
     private var findBar: some View {
         HStack(spacing: 9) {
             TextField("Find in document", text: $windowState.findQuery)
@@ -583,7 +605,7 @@ struct CodePad16Window: View {
                 Image(systemName: "chevron.down")
             }
             .help("Next match")
-            Text("\(editorController.matchCount(windowState.findQuery, in: store.activeDocument?.text ?? "")) matches")
+            Text(findStatusText)
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
             Button { windowState.showFind = false } label: {
@@ -801,18 +823,10 @@ final class EditorController: ObservableObject {
 
     var selectedText: String { scintillaView?.selectedText ?? "" }
 
-    func matchCount(_ query: String, in text: String) -> Int {
-        guard !query.isEmpty else { return 0 }
-        let contents = text as NSString
-        var cursor = 0
-        var count = 0
-        while cursor < contents.length {
-            let match = contents.range(of: query, options: [.caseInsensitive], range: NSRange(location: cursor, length: contents.length - cursor))
-            guard match.location != NSNotFound else { break }
-            count += 1
-            cursor = NSMaxRange(match)
-        }
-        return count
+    func matchInfo(_ query: String) -> (index: Int, total: Int) {
+        guard let editor = scintillaView else { return (0, 0) }
+        let info = editor.matchInfo(query)
+        return (info.location, info.length)
     }
 }
 

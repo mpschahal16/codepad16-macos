@@ -10,6 +10,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, copy, nullable) void (^onChange)(NSString * _Nullable text, NSInteger line, NSInteger column, BOOL modified, NSInteger lineCount);
 - (void)selectRange:(NSRange)range;
 - (NSRange)selection;
+- (NSRange)matchInfo:(NSString *)query;
 - (void)find:(NSString *)query backwards:(BOOL)backwards;
 @property(nonatomic, readonly) NSInteger caretPosition;
 @property(nonatomic, readonly) NSInteger firstVisibleLine;

@@ -220,6 +220,34 @@
     return NSMakeRange((NSUInteger)start, (NSUInteger)MAX(0, end - start));
 }
 
+/// Returns the 1-based index of the next match from the selection in `location`
+/// (0 when the selection is past the last match) and the total in `length`.
+- (NSRange)matchInfo:(NSString *)query {
+    if (!query.length) return NSMakeRange(0, 0);
+    NSData *needle = [query dataUsingEncoding:NSUTF8StringEncoding];
+    if (!needle.length) return NSMakeRange(0, 0);
+    const char *bytes = static_cast<const char *>(needle.bytes);
+    const sptr_t needleLength = static_cast<sptr_t>(needle.length);
+
+    [self.editor message:SCI_SETSEARCHFLAGS wParam:SCFIND_MATCHCASE lParam:0];
+
+    const sptr_t selectionStart = [self.editor message:SCI_GETSELECTIONSTART];
+    const sptr_t maximum = [self.editor message:SCI_GETLENGTH];
+    sptr_t position = 0;
+    NSInteger total = 0;
+    NSInteger index = 0;
+    while (position <= maximum) {
+        [self.editor message:SCI_SETTARGETRANGE wParam:position lParam:maximum];
+        const sptr_t found = (sptr_t)[self.editor message:SCI_SEARCHINTARGET wParam:needleLength lParam:(sptr_t)bytes];
+        if (found < 0) break;
+        total += 1;
+        if (index == 0 && found >= selectionStart) index = total;
+        const sptr_t foundEnd = (sptr_t)[self.editor message:SCI_GETTARGETEND];
+        position = (foundEnd > found) ? foundEnd : found + 1;
+    }
+    return NSMakeRange((NSUInteger)index, (NSUInteger)total);
+}
+
 - (void)selectRange:(NSRange)range {
     [self.editor message:SCI_SETSEL wParam:range.location lParam:NSMaxRange(range)];
     [self.editor message:SCI_SCROLLCARET];
@@ -228,9 +256,40 @@
 
 - (void)find:(NSString *)query backwards:(BOOL)backwards {
     if (!query.length) return;
+    NSData *needle = [query dataUsingEncoding:NSUTF8StringEncoding];
+    if (!needle.length) return;
+    const char *bytes = static_cast<const char *>(needle.bytes);
+    const sptr_t needleLength = static_cast<sptr_t>(needle.length);
+
     [self.editor message:SCI_SETSEARCHFLAGS wParam:SCFIND_MATCHCASE lParam:0];
-    const char *needle = query.UTF8String;
-    [self.editor message:(backwards ? SCI_SEARCHPREV : SCI_SEARCHNEXT) wParam:query.length lParam:(sptr_t)needle];
+
+    const sptr_t minimum = 0;
+    const sptr_t maximum = [self.editor message:SCI_GETLENGTH];
+    const sptr_t anchor = backwards
+        ? [self.editor message:SCI_GETSELECTIONSTART]
+        : [self.editor message:SCI_GETSELECTIONEND];
+
+    // Search beside the current selection first, then wrap around the document,
+    // so repeated Find Next / Find Previous moves through all matches.
+    // A target range whose end precedes its start searches backwards.
+    const sptr_t ranges[2][2] = {
+        { anchor, backwards ? minimum : maximum },
+        { backwards ? maximum : minimum, backwards ? minimum : maximum },
+    };
+
+    sptr_t found = -1;
+    sptr_t foundEnd = 0;
+    for (int pass = 0; pass < 2 && found < 0; pass++) {
+        [self.editor message:SCI_SETTARGETRANGE wParam:ranges[pass][0] lParam:ranges[pass][1]];
+        found = (sptr_t)[self.editor message:SCI_SEARCHINTARGET wParam:needleLength lParam:(sptr_t)bytes];
+        if (found >= 0) {
+            foundEnd = (sptr_t)[self.editor message:SCI_GETTARGETEND];
+        }
+    }
+
+    if (found < 0) return;
+    [self.editor message:SCI_SETSEL wParam:found lParam:foundEnd];
+    [self.editor message:SCI_SCROLLCARET];
 }
 
 - (NSInteger)caretPosition {
