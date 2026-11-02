@@ -424,6 +424,8 @@ struct CodePad16Window: View {
     @StateObject private var windowState = WindowState()
     @StateObject private var editorController = EditorController()
 
+    private static let latestReleaseURL = URL(string: "https://github.com/mpschahal16/codepad16-macos/releases/latest")!
+
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -445,6 +447,12 @@ struct CodePad16Window: View {
         }
         .background(Color(nsColor: .textBackgroundColor))
         .modifier(WindowTitleModifier(document: store.activeDocument))
+        .sheet(isPresented: $windowState.showAbout) {
+            AboutView { windowState.showAbout = false }
+        }
+        .sheet(isPresented: $windowState.showLicense) {
+            LicenseView { windowState.showLicense = false }
+        }
         .onAppear {
             appearance.apply()
             appDelegate.reopenWindow = { openWindow(id: "main") }
@@ -542,6 +550,19 @@ struct CodePad16Window: View {
             .help("Editor options")
             Button { tools.isPanelVisible.toggle() } label: { Label("Tools", systemImage: "sparkles") }
                 .help(tools.isPanelVisible ? "Hide tool runner" : "Show tool runner")
+            Menu {
+                Button("About CodePad16") { windowState.showAbout = true }
+                Button("Check for Updates…") {
+                    NSWorkspace.shared.open(Self.latestReleaseURL)
+                }
+                Divider()
+                Button("License…") { windowState.showLicense = true }
+            } label: {
+                Label("Help", systemImage: "questionmark.circle")
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("Help")
             Divider().frame(height: 18)
             Menu {
                 ForEach(AppearanceMode.allCases) { mode in
@@ -795,6 +816,8 @@ struct EditorPane: View {
 final class WindowState: ObservableObject {
     @Published var showFind = false
     @Published var findQuery = ""
+    @Published var showAbout = false
+    @Published var showLicense = false
 }
 
 @MainActor

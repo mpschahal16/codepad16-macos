@@ -26,6 +26,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$ROOT/.build/release/CodePad16" "$APP/Contents/MacOS/CodePad16"
 cp "$ROOT/Resources/CodePad16.icns" "$APP/Contents/Resources/CodePad16.icns"
+cp "$ROOT/LICENSE" "$APP/Contents/Resources/LICENSE"
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
