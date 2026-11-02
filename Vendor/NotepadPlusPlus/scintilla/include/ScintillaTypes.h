@@ -234,7 +234,6 @@ enum class IndicatorStyle {
 	Gradient = 20,
 	GradientCentre = 21,
 	PointTop = 22,
-	ExplorerLink = 23,
 };
 
 enum class IndicatorNumbers {
@@ -709,6 +708,7 @@ enum class Notification {
 
 using Position = intptr_t;
 using Line = intptr_t;
+using Pixels = int;
 using Colour = int;
 using ColourAlpha = int;
 using uptr_t = uintptr_t;

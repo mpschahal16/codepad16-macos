@@ -127,7 +127,6 @@ let package = Package(
                 "lexilla/lexers/LexNsis.cxx",
                 "lexilla/lexers/LexNull.cxx",
                 "lexilla/lexers/LexOScript.cxx",
-                "lexilla/lexers/LexObjC.cxx",
                 "lexilla/lexers/LexOpal.cxx",
                 "lexilla/lexers/LexPB.cxx",
                 "lexilla/lexers/LexPLM.cxx",
