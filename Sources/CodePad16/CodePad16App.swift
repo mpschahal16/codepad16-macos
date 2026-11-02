@@ -39,6 +39,7 @@ struct CodePad16App: App {
     @StateObject private var appearance = AppearanceSettings()
     @StateObject private var options = EditorOptions()
     @StateObject private var tools = ToolRunner()
+    @StateObject private var help = HelpState()
     @NSApplicationDelegateAdaptor(CodePad16AppDelegate.self) private var appDelegate
 
     var body: some Scene {
@@ -48,6 +49,7 @@ struct CodePad16App: App {
                 .environmentObject(appearance)
                 .environmentObject(options)
                 .environmentObject(tools)
+                .environmentObject(help)
                 .frame(minWidth: 760, minHeight: 500)
         }
         .commands {
@@ -92,6 +94,15 @@ struct CodePad16App: App {
                     }
                 }
                 .disabled(store.activeDocument?.url == nil)
+            }
+            CommandGroup(replacing: .help) {
+                Button("About CodePad16") { help.showAbout = true }
+                Button("Check for Updates…") {
+                    NSWorkspace.shared.open(HelpState.latestReleaseURL)
+                }
+                Divider()
+                Button("Release Notes") { help.showReleaseNotes = true }
+                Button("License…") { help.showLicense = true }
             }
         }
     }
@@ -420,11 +431,10 @@ struct CodePad16Window: View {
     @EnvironmentObject private var appearance: AppearanceSettings
     @EnvironmentObject private var options: EditorOptions
     @EnvironmentObject private var tools: ToolRunner
+    @EnvironmentObject private var help: HelpState
     @Environment(\.openWindow) private var openWindow
     @StateObject private var windowState = WindowState()
     @StateObject private var editorController = EditorController()
-
-    private static let latestReleaseURL = URL(string: "https://github.com/mpschahal16/codepad16-macos/releases/latest")!
 
     var body: some View {
         VStack(spacing: 0) {
@@ -447,14 +457,14 @@ struct CodePad16Window: View {
         }
         .background(Color(nsColor: .textBackgroundColor))
         .modifier(WindowTitleModifier(document: store.activeDocument))
-        .sheet(isPresented: $windowState.showAbout) {
-            AboutView { windowState.showAbout = false }
+        .sheet(isPresented: $help.showAbout) {
+            AboutView { help.showAbout = false }
         }
-        .sheet(isPresented: $windowState.showLicense) {
-            LicenseView { windowState.showLicense = false }
+        .sheet(isPresented: $help.showLicense) {
+            LicenseView { help.showLicense = false }
         }
-        .sheet(isPresented: $windowState.showReleaseNotes) {
-            ReleaseNotesView { windowState.showReleaseNotes = false }
+        .sheet(isPresented: $help.showReleaseNotes) {
+            ReleaseNotesView { help.showReleaseNotes = false }
         }
         .onAppear {
             appearance.apply()
@@ -554,13 +564,13 @@ struct CodePad16Window: View {
             Button { tools.isPanelVisible.toggle() } label: { Label("Tools", systemImage: "sparkles") }
                 .help(tools.isPanelVisible ? "Hide tool runner" : "Show tool runner")
             Menu {
-                Button("About CodePad16") { windowState.showAbout = true }
+                Button("About CodePad16") { help.showAbout = true }
                 Button("Check for Updates…") {
-                    NSWorkspace.shared.open(Self.latestReleaseURL)
+                    NSWorkspace.shared.open(HelpState.latestReleaseURL)
                 }
                 Divider()
-                Button("Release Notes") { windowState.showReleaseNotes = true }
-                Button("License…") { windowState.showLicense = true }
+                Button("Release Notes") { help.showReleaseNotes = true }
+                Button("License…") { help.showLicense = true }
             } label: {
                 Label("Help", systemImage: "questionmark.circle")
             }
@@ -820,6 +830,14 @@ struct EditorPane: View {
 final class WindowState: ObservableObject {
     @Published var showFind = false
     @Published var findQuery = ""
+}
+
+/// Shared help state so the in-window Help menu and the macOS Help menu
+/// can present the same panels.
+@MainActor
+final class HelpState: ObservableObject {
+    static let latestReleaseURL = URL(string: "https://github.com/mpschahal16/codepad16-macos/releases/latest")!
+
     @Published var showAbout = false
     @Published var showLicense = false
     @Published var showReleaseNotes = false
