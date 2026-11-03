@@ -7,6 +7,7 @@ struct FindInFilesView: View {
     let onOpen: (URL, Int) -> Void
 
     @StateObject private var model = FindInFilesModel()
+    @StateObject private var collapse = FileCollapseState()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -17,8 +18,11 @@ struct FindInFilesView: View {
             Divider()
             footer
         }
-        .frame(width: 720, height: 500)
+        .frame(minWidth: 560, minHeight: 360)
         .onDisappear { model.cancel() }
+        .onChange(of: model.results.map(\.id)) { _ in
+            collapse.reset()
+        }
     }
 
     private var folderRow: some View {
@@ -66,38 +70,78 @@ struct FindInFilesView: View {
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            List {
-                ForEach(model.results) { file in
-                    Section {
-                        ForEach(file.matches) { match in
-                            Button {
-                                onOpen(file.url, match.line)
-                            } label: {
-                                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                    Text("\(match.line)")
-                                        .font(.system(size: 11, design: .monospaced))
-                                        .foregroundStyle(.secondary)
-                                        .frame(width: 46, alignment: .trailing)
-                                    Text(match.text)
-                                        .font(.system(size: 12, design: .monospaced))
-                                        .lineLimit(1)
-                                        .truncationMode(.tail)
-                                    Spacer(minLength: 0)
-                                }
-                                .contentShape(Rectangle())
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(model.results) { file in
+                        fileHeader(file)
+                        if !collapse.contains(file.url) {
+                            ForEach(file.matches) { match in
+                                resultRow(file: file, match: match)
                             }
-                            .buttonStyle(.plain)
                         }
-                    } header: {
-                        Text(relativePath(for: file.url))
-                            .font(.system(size: 11, weight: .semibold))
-                            .lineLimit(1)
-                            .truncationMode(.middle)
+                        Divider()
                     }
                 }
             }
-            .listStyle(.inset)
         }
+    }
+
+    private func fileHeader(_ file: FileMatches) -> some View {
+        Button {
+            collapse.toggle(file.url)
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: collapse.contains(file.url) ? "chevron.right" : "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 10)
+                Text(relativePath(for: file.url))
+                    .font(.system(size: 11, weight: .semibold))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: 0)
+                Text("\(file.matches.count)")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1)
+                    .background(Capsule().fill(Color.secondary.opacity(0.15)))
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .background(Color(nsColor: .controlBackgroundColor))
+        }
+        .buttonStyle(.plain)
+        .help(collapse.contains(file.url) ? "Expand file results" : "Collapse file results")
+    }
+
+    private func resultRow(file: FileMatches, match: FileMatch) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text("\(match.line)")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .frame(width: 46, alignment: .trailing)
+            Text(match.text)
+                .font(.system(size: 12, design: .monospaced))
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .gesture(
+            TapGesture(count: 2)
+                .onEnded { onOpen(file.url, match.line) }
+                .exclusively(
+                    before: TapGesture(count: 1)
+                        .onEnded { onOpen(file.url, match.line) }
+                )
+        )
+        .help("Open \(file.url.lastPathComponent) at line \(match.line)")
     }
 
     private var footer: some View {
@@ -107,6 +151,12 @@ struct FindInFilesView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
             Spacer(minLength: 0)
+            if !model.results.isEmpty {
+                Button(collapse.allCollapsed(model.results.map(\.id)) ? "Expand All" : "Collapse All") {
+                    collapse.setAll(model.results.map(\.id), collapsed: !collapse.allCollapsed(model.results.map(\.id)))
+                }
+                .buttonStyle(.borderless)
+            }
             Button("Close", action: onClose)
                 .keyboardShortcut(.cancelAction)
         }
@@ -132,6 +182,39 @@ struct FileMatches: Identifiable {
     let matches: [FileMatch]
 
     var id: URL { url }
+}
+
+@MainActor
+final class FileCollapseState: ObservableObject {
+    @Published private(set) var collapsedFiles: Set<URL> = []
+
+    func contains(_ url: URL) -> Bool {
+        collapsedFiles.contains(url)
+    }
+
+    func toggle(_ url: URL) {
+        if collapsedFiles.contains(url) {
+            collapsedFiles.remove(url)
+        } else {
+            collapsedFiles.insert(url)
+        }
+    }
+
+    func reset() {
+        collapsedFiles.removeAll()
+    }
+
+    func allCollapsed(_ urls: [URL]) -> Bool {
+        !urls.isEmpty && urls.allSatisfy { collapsedFiles.contains($0) }
+    }
+
+    func setAll(_ urls: [URL], collapsed: Bool) {
+        if collapsed {
+            collapsedFiles.formUnion(urls)
+        } else {
+            collapsedFiles.subtract(urls)
+        }
+    }
 }
 
 @MainActor

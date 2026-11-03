@@ -499,12 +499,6 @@ struct CodePad16Window: View {
         .sheet(isPresented: $updates.isPresented) {
             UpdateView(onClose: { updates.isPresented = false }, checker: updates)
         }
-        .sheet(isPresented: $windowState.showFindInFiles) {
-            FindInFilesView(
-                onClose: { windowState.showFindInFiles = false },
-                onOpen: { url, line in openSearchResult(url, line: line) }
-            )
-        }
         .onAppear {
             appearance.apply()
             appDelegate.reopenWindow = { openWindow(id: "main") }
@@ -583,7 +577,7 @@ struct CodePad16Window: View {
                     .keyboardShortcut("f", modifiers: .command)
                 Button { openReplaceBar() } label: { Label("Replace…", systemImage: "arrow.left.arrow.right") }
                     .keyboardShortcut("f", modifiers: [.command, .option])
-                Button { windowState.showFindInFiles = true } label: {
+                Button { openFindInFiles() } label: {
                     Label("Find in Files…", systemImage: "doc.text.magnifyingglass")
                 }
                 .keyboardShortcut("f", modifiers: [.command, .shift])
@@ -712,8 +706,31 @@ struct CodePad16Window: View {
         }
     }
 
+    private func openFindInFiles() {
+        if let panel = windowState.findInFilesPanel {
+            panel.makeKeyAndOrderFront(nil)
+            return
+        }
+
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 720, height: 500),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .utilityWindow],
+            backing: .buffered,
+            defer: false
+        )
+        panel.title = "Find in Files"
+        panel.isReleasedWhenClosed = false
+        panel.hidesOnDeactivate = false
+        panel.contentView = NSHostingView(rootView: FindInFilesView(
+            onClose: { [weak panel] in panel?.close() },
+            onOpen: { url, line in openSearchResult(url, line: line) }
+        ))
+        panel.center()
+        windowState.findInFilesPanel = panel
+        panel.makeKeyAndOrderFront(nil)
+    }
+
     private func openSearchResult(_ url: URL, line: Int) {
-        windowState.showFindInFiles = false
         guard let document = store.openFile(at: url) else { return }
         // Restore the caret when the editor view is rebuilt, and jump once the
         // active document has switched for an already-open tab.
@@ -1010,7 +1027,7 @@ final class WindowState: ObservableObject {
     @Published var findQuery = ""
     @Published var replaceQuery = ""
     @Published var replaceStatus = ""
-    @Published var showFindInFiles = false
+    var findInFilesPanel: NSPanel?
     @Published private(set) var findHistory: [String]
     @Published private(set) var replaceHistory: [String]
 
