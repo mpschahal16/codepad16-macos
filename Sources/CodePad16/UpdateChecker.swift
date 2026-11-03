@@ -10,6 +10,7 @@ final class UpdateChecker: ObservableObject {
         case upToDate(current: String, latest: String)
         case downloading(version: String)
         case downloaded(version: String, file: URL)
+        case installing(version: String)
         case failed(String)
     }
 
@@ -43,6 +44,17 @@ final class UpdateChecker: ObservableObject {
         Task {
             await check()
             isChecking = false
+        }
+    }
+
+    func installDownloadedUpdate() {
+        guard case .downloaded(let version, let file) = phase else { return }
+        phase = .installing(version: version)
+        UpdateInstaller.install(dmg: file) { [weak self] result in
+            Task { @MainActor in
+                guard let self, case .failure(let error) = result else { return }
+                self.phase = .failed(error.localizedDescription)
+            }
         }
     }
 

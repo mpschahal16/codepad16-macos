@@ -41,9 +41,23 @@ Fourth prototype release for Apple Silicon macOS.
 - Drag-to-Applications disk image with an arranged Finder layout
 - Apple Silicon arm64 application bundle
 
+### Installing
+
+The app is ad-hoc signed and not notarized yet, so macOS may block the first launch with a message that Apple could not verify CodePad16. To open it:
+
+1. Open the downloaded disk image and drag **CodePad16** to **Applications**.
+2. Open **System Settings → Privacy & Security**, scroll to **Security**, click **Open Anyway** for CodePad16, and confirm. On macOS 14 and earlier you can also right-click CodePad16 in Finder and choose **Open**.
+3. Alternatively, remove the download quarantine in Terminal, then open the app:
+
+   ```sh
+   xattr -dr com.apple.quarantine /Applications/CodePad16.app
+   ```
+
+Later launches, and updates installed with **Help → Check for Updates**, do not show this prompt.
+
 ### Limitations
 
-This is an early prototype. Plugins and advanced search are not included. Swift uses the C-family lexer as an initial approximation. The app is ad-hoc signed and not notarized, so macOS may ask you to confirm the first launch.
+This is an early prototype. Plugins and advanced search are not included. Swift uses the C-family lexer as an initial approximation.
 
 The README credits Notepad++ and its author for making the source available; CodePad16 is an independent project and is not an official Notepad++ release.
 

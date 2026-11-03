@@ -28,7 +28,7 @@ struct UpdateView: View {
                     .font(.system(size: 12))
                 Spacer()
                 Button("Close", action: onClose)
-                    .keyboardShortcut(.defaultAction)
+                    .keyboardShortcut(.cancelAction)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
@@ -39,7 +39,7 @@ struct UpdateView: View {
     @ViewBuilder
     private var icon: some View {
         switch checker.phase {
-        case .idle, .checking, .downloading:
+        case .idle, .checking, .downloading, .installing:
             ProgressView()
                 .controlSize(.large)
         case .upToDate:
@@ -67,6 +67,8 @@ struct UpdateView: View {
             return "Downloading CodePad16 \(version)…"
         case .downloaded(let version, _):
             return "CodePad16 \(version) downloaded"
+        case .installing(let version):
+            return "Installing CodePad16 \(version)…"
         case .failed:
             return "Couldn't check for updates"
         }
@@ -84,6 +86,8 @@ struct UpdateView: View {
             return "The disk image will be saved to your Downloads folder."
         case .downloaded(_, let file):
             return "Saved to \(file.path)"
+        case .installing:
+            return "CodePad16 will quit and reopen when the update is installed."
         case .failed(let reason):
             return reason
         }
@@ -94,6 +98,10 @@ struct UpdateView: View {
         switch checker.phase {
         case .downloaded(_, let file):
             HStack(spacing: 10) {
+                Button("Install Update") {
+                    checker.installDownloadedUpdate()
+                }
+                .keyboardShortcut(.defaultAction)
                 Button("Show in Finder") {
                     NSWorkspace.shared.activateFileViewerSelecting([file])
                 }

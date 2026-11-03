@@ -4,6 +4,19 @@ A small, native macOS text and code editor prototype for Apple Silicon. It is an
 
 **[Download the latest release](https://github.com/mpschahal16/codepad16-macos/releases/latest)** for Apple Silicon macOS.
 
+## Install on macOS
+
+1. Open the downloaded DMG and drag **CodePad16** to **Applications**.
+2. The app is ad-hoc signed and not notarized yet, so macOS may block the first launch with a message that Apple could not verify CodePad16. This is expected.
+3. Open **System Settings → Privacy & Security**, scroll to **Security**, click **Open Anyway** for CodePad16, and confirm. On macOS 14 and earlier you can also right-click CodePad16 in Finder and choose **Open**.
+4. Alternatively, remove the download quarantine in Terminal, then open the app:
+
+   ```sh
+   xattr -dr com.apple.quarantine /Applications/CodePad16.app
+   ```
+
+Updates installed from **Check for Updates** inside CodePad16 do not trigger this prompt.
+
 ![CodePad16 for macOS in dark mode showing Package.swift open with syntax highlighting, a line-number gutter, the File, Search, Editor, Tools, Help, and appearance header controls, and the tool runner panel](Assets/preview.png)
 
 ## Current features
@@ -38,7 +51,7 @@ cd codepad16-macos
 open dist/CodePad16.app
 ```
 
-The script builds for the host architecture. Run it on an Apple Silicon Mac to produce an `arm64` app. The app is ad-hoc signed for local testing, but it is not Developer ID signed or notarized, so macOS may show a security prompt when opening it.
+The script builds for the host architecture. Run it on an Apple Silicon Mac to produce an `arm64` app. The app is ad-hoc signed for local testing, but it is not Developer ID signed or notarized, so macOS may block the first launch; see [Install on macOS](#install-on-macos) for how to open it.
 
 To package the built app as a drag-to-Applications disk image, run:
 
