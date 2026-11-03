@@ -274,6 +274,35 @@ final class EditorStore: ObservableObject {
         saveSession()
     }
 
+    /// Opens a file without showing the open panel, activating it when it is
+    /// already open. Used by Find in Files result rows.
+    @discardableResult
+    func openFile(at url: URL) -> EditorDocument? {
+        if let existing = documents.first(where: { $0.url == url }) {
+            activate(existing)
+            return existing
+        }
+        do {
+            let data = try Data(contentsOf: url)
+            guard let (encoding, contents) = TextEncoding.decode(data) else {
+                showError(
+                    "Could not open \(url.lastPathComponent)",
+                    detail: "The file is not valid UTF-8, UTF-16, UTF-32, or ISO-8859-1 text."
+                )
+                return nil
+            }
+            captureActiveDocument?()
+            let document = EditorDocument(text: contents, url: url, encoding: encoding)
+            documents.append(document)
+            activeDocumentID = document.id
+            saveSession()
+            return document
+        } catch {
+            showError("Could not open \(url.lastPathComponent)", detail: error.localizedDescription)
+            return nil
+        }
+    }
+
     func openFiles() {
         captureActiveDocument?()
         let panel = NSOpenPanel()
@@ -470,6 +499,12 @@ struct CodePad16Window: View {
         .sheet(isPresented: $updates.isPresented) {
             UpdateView(onClose: { updates.isPresented = false }, checker: updates)
         }
+        .sheet(isPresented: $windowState.showFindInFiles) {
+            FindInFilesView(
+                onClose: { windowState.showFindInFiles = false },
+                onOpen: { url, line in openSearchResult(url, line: line) }
+            )
+        }
         .onAppear {
             appearance.apply()
             appDelegate.reopenWindow = { openWindow(id: "main") }
@@ -544,13 +579,22 @@ struct CodePad16Window: View {
             .fixedSize()
             .help("File actions")
             Menu {
-                Button { windowState.showFind.toggle() } label: { Label("Find…", systemImage: "magnifyingglass") }
+                Button { toggleFindBar() } label: { Label("Find…", systemImage: "magnifyingglass") }
                     .keyboardShortcut("f", modifiers: .command)
+                Button { openReplaceBar() } label: { Label("Replace…", systemImage: "arrow.left.arrow.right") }
+                    .keyboardShortcut("f", modifiers: [.command, .option])
+                Button { windowState.showFindInFiles = true } label: {
+                    Label("Find in Files…", systemImage: "doc.text.magnifyingglass")
+                }
+                .keyboardShortcut("f", modifiers: [.command, .shift])
                 Divider()
                 Button { findInDocument(backwards: false) } label: { Text("Find Next") }
                     .keyboardShortcut("g", modifiers: .command)
                 Button { findInDocument(backwards: true) } label: { Text("Find Previous") }
                     .keyboardShortcut("g", modifiers: [.command, .shift])
+                Divider()
+                Button { promptGoToLine() } label: { Label("Go to Line…", systemImage: "number") }
+                    .keyboardShortcut("l", modifiers: .command)
             } label: {
                 Label("Search", systemImage: "magnifyingglass")
             }
@@ -613,6 +657,7 @@ struct CodePad16Window: View {
             windowState.showFind = true
             return
         }
+        windowState.recordSearch(windowState.findQuery)
         if backwards {
             editorController.findPrevious(windowState.findQuery)
         } else {
@@ -629,26 +674,156 @@ struct CodePad16Window: View {
         return "\(index) of \(info.total)"
     }
 
+    private func openReplaceBar() {
+        windowState.showFind = true
+        windowState.showReplace = true
+        windowState.replaceStatus = ""
+    }
+
+    private func toggleFindBar() {
+        if windowState.showFind {
+            closeFindBar()
+        } else {
+            windowState.showFind = true
+        }
+    }
+
+    private func closeFindBar() {
+        windowState.showFind = false
+        windowState.showReplace = false
+        windowState.findQuery = ""
+        windowState.replaceQuery = ""
+        windowState.replaceStatus = ""
+    }
+
+    private func promptGoToLine() {
+        let alert = NSAlert()
+        alert.messageText = "Go to Line"
+        alert.informativeText = "Enter a line number between 1 and \(editorController.lineCount)."
+        alert.addButton(withTitle: "Go")
+        alert.addButton(withTitle: "Cancel")
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 220, height: 24))
+        field.placeholderString = "Line number"
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        if let line = Int(field.stringValue), line > 0 {
+            editorController.goToLine(line)
+        }
+    }
+
+    private func openSearchResult(_ url: URL, line: Int) {
+        windowState.showFindInFiles = false
+        guard let document = store.openFile(at: url) else { return }
+        // Restore the caret when the editor view is rebuilt, and jump once the
+        // active document has switched for an already-open tab.
+        document.caretPosition = Self.byteOffset(ofLine: line, in: document.text)
+        DispatchQueue.main.async {
+            editorController.goToLine(line)
+        }
+    }
+
+    private static func byteOffset(ofLine line: Int, in text: String) -> Int {
+        guard line > 1 else { return 0 }
+        var currentLine = 1
+        var offset = 0
+        for byte in text.utf8 {
+            if currentLine >= line { break }
+            offset += 1
+            if byte == 0x0A { currentLine += 1 }
+        }
+        return offset
+    }
+
+    private func replaceCurrentMatch() {
+        guard !windowState.findQuery.isEmpty else { return }
+        windowState.recordSearch(windowState.findQuery)
+        windowState.recordReplacement(windowState.replaceQuery)
+        let replaced = editorController.replaceCurrent(
+            windowState.findQuery,
+            with: windowState.replaceQuery
+        )
+        windowState.replaceStatus = replaced ? "Replaced 1 match" : ""
+    }
+
+    private func replaceAllMatches() {
+        guard !windowState.findQuery.isEmpty else { return }
+        windowState.recordSearch(windowState.findQuery)
+        windowState.recordReplacement(windowState.replaceQuery)
+        let count = editorController.replaceAll(
+            windowState.findQuery,
+            with: windowState.replaceQuery
+        )
+        switch count {
+        case 0:
+            windowState.replaceStatus = "No matches"
+        case 1:
+            windowState.replaceStatus = "Replaced 1 match"
+        default:
+            windowState.replaceStatus = "Replaced \(count) matches"
+        }
+    }
+
     private var findBar: some View {
-        HStack(spacing: 9) {
-            TextField("Find in document", text: $windowState.findQuery)
-                .textFieldStyle(.roundedBorder)
-                .onSubmit { editorController.findNext(windowState.findQuery) }
-            Button { editorController.findPrevious(windowState.findQuery) } label: {
-                Image(systemName: "chevron.up")
+        VStack(spacing: 6) {
+            HStack(spacing: 9) {
+                HistoryComboBox(
+                    text: $windowState.findQuery,
+                    items: windowState.findHistory,
+                    placeholder: "Find in document",
+                    onSubmit: { findInDocument(backwards: false) }
+                )
+                .frame(minWidth: 140, maxWidth: .infinity)
+                Button { findInDocument(backwards: true) } label: {
+                    Image(systemName: "chevron.up")
+                }
+                .help("Previous match")
+                Button { findInDocument(backwards: false) } label: {
+                    Image(systemName: "chevron.down")
+                }
+                .help("Next match")
+                Button {
+                    windowState.showReplace.toggle()
+                    windowState.replaceStatus = ""
+                } label: {
+                    Image(systemName: "arrow.left.arrow.right")
+                }
+                .help(windowState.showReplace ? "Hide replace" : "Show replace")
+                Toggle("Match case", isOn: $editorController.matchCase)
+                    .toggleStyle(.checkbox)
+                    .font(.system(size: 11))
+                    .help("Match case")
+                Text(findStatusText)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                Button {
+                    closeFindBar()
+                } label: {
+                    Image(systemName: "xmark")
+                }
+                .help("Close Find")
             }
-            .help("Previous match")
-            Button { editorController.findNext(windowState.findQuery) } label: {
-                Image(systemName: "chevron.down")
+            if windowState.showReplace {
+                HStack(spacing: 9) {
+                    HistoryComboBox(
+                        text: $windowState.replaceQuery,
+                        items: windowState.replaceHistory,
+                        placeholder: "Replace with",
+                        onSubmit: { replaceCurrentMatch() }
+                    )
+                    .frame(minWidth: 140, maxWidth: .infinity)
+                    Button("Replace") { replaceCurrentMatch() }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    Button("Replace All") { replaceAllMatches() }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    Text(windowState.replaceStatus)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                }
             }
-            .help("Next match")
-            Text(findStatusText)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-            Button { windowState.showFind = false } label: {
-                Image(systemName: "xmark")
-            }
-            .help("Close Find")
         }
         .buttonStyle(.borderless)
         .padding(.horizontal, 13)
@@ -831,7 +1006,54 @@ struct EditorPane: View {
 @MainActor
 final class WindowState: ObservableObject {
     @Published var showFind = false
+    @Published var showReplace = false
     @Published var findQuery = ""
+    @Published var replaceQuery = ""
+    @Published var replaceStatus = ""
+    @Published var showFindInFiles = false
+    @Published private(set) var findHistory: [String]
+    @Published private(set) var replaceHistory: [String]
+
+    private static let findHistoryKey = "CodePad16.findHistory"
+    private static let replaceHistoryKey = "CodePad16.replaceHistory"
+    private static let historyLimit = 10
+
+    init() {
+        let defaults = UserDefaults.standard
+        findHistory = defaults.stringArray(forKey: Self.findHistoryKey) ?? []
+        replaceHistory = defaults.stringArray(forKey: Self.replaceHistoryKey) ?? []
+    }
+
+    func recordSearch(_ term: String) {
+        findHistory = Self.record(term, in: findHistory)
+        UserDefaults.standard.set(findHistory, forKey: Self.findHistoryKey)
+    }
+
+    func recordReplacement(_ term: String) {
+        replaceHistory = Self.record(term, in: replaceHistory)
+        UserDefaults.standard.set(replaceHistory, forKey: Self.replaceHistoryKey)
+    }
+
+    func clearSearchHistory() {
+        findHistory = []
+        UserDefaults.standard.removeObject(forKey: Self.findHistoryKey)
+    }
+
+    func clearReplaceHistory() {
+        replaceHistory = []
+        UserDefaults.standard.removeObject(forKey: Self.replaceHistoryKey)
+    }
+
+    private static func record(_ term: String, in history: [String]) -> [String] {
+        let trimmed = term.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return history }
+        var updated = history.filter { $0 != trimmed }
+        updated.insert(trimmed, at: 0)
+        if updated.count > historyLimit {
+            updated.removeLast(updated.count - historyLimit)
+        }
+        return updated
+    }
 }
 
 /// Shared help state so the in-window Help menu and the macOS Help menu
@@ -848,6 +1070,12 @@ final class EditorController: ObservableObject {
     weak var scintillaView: CodePad16ScintillaView?
     @Published private(set) var cursorLine = 1
     @Published private(set) var cursorColumn = 1
+    @Published var matchCase = false
+
+    private func prepare(_ editor: CodePad16ScintillaView) -> CodePad16ScintillaView {
+        editor.matchCase = matchCase
+        return editor
+    }
 
     func updateCursorPosition(line: Int, column: Int) {
         let newLine = max(1, line)
@@ -864,14 +1092,34 @@ final class EditorController: ObservableObject {
         document.firstVisibleLine = editor.firstVisibleLine
     }
 
-    func findNext(_ query: String) { scintillaView?.find(query, backwards: false) }
-    func findPrevious(_ query: String) { scintillaView?.find(query, backwards: true) }
+    func findNext(_ query: String) {
+        guard let editor = scintillaView else { return }
+        prepare(editor).find(query, backwards: false)
+    }
+    func findPrevious(_ query: String) {
+        guard let editor = scintillaView else { return }
+        prepare(editor).find(query, backwards: true)
+    }
+    func replaceCurrent(_ query: String, with replacement: String) -> Bool {
+        guard let editor = scintillaView else { return false }
+        return prepare(editor).replace(query, with: replacement)
+    }
+    func replaceAll(_ query: String, with replacement: String) -> Int {
+        guard let editor = scintillaView else { return 0 }
+        return prepare(editor).replaceAll(query, with: replacement)
+    }
+    func goToLine(_ line: Int) {
+        guard let editor = scintillaView else { return }
+        prepare(editor).go(toLine: line)
+    }
+
+    var lineCount: Int { scintillaView?.lineCount ?? 1 }
 
     var selectedText: String { scintillaView?.selectedText ?? "" }
 
     func matchInfo(_ query: String) -> (index: Int, total: Int) {
         guard let editor = scintillaView else { return (0, 0) }
-        let info = editor.matchInfo(query)
+        let info = prepare(editor).matchInfo(query)
         return (info.location, info.length)
     }
 }

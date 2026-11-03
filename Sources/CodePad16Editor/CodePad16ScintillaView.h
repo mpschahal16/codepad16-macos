@@ -7,11 +7,16 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, copy) NSString *lexerName;
 @property(nonatomic, copy) NSArray<NSString *> *keywordSets;
 @property(nonatomic) BOOL wordWrap;
+@property(nonatomic) BOOL matchCase;
 @property(nonatomic, copy, nullable) void (^onChange)(NSString * _Nullable text, NSInteger line, NSInteger column, BOOL modified, NSInteger lineCount);
 - (void)selectRange:(NSRange)range;
 - (NSRange)selection;
 - (NSRange)matchInfo:(NSString *)query;
 - (void)find:(NSString *)query backwards:(BOOL)backwards;
+- (BOOL)replace:(NSString *)query with:(NSString *)replacement;
+- (NSInteger)replaceAll:(NSString *)query with:(NSString *)replacement;
+- (void)goToLine:(NSInteger)line;
+@property(nonatomic, readonly) NSInteger lineCount;
 @property(nonatomic, readonly) NSInteger caretPosition;
 @property(nonatomic, readonly) NSInteger firstVisibleLine;
 @property(nonatomic, readonly) NSString *selectedText;

@@ -229,7 +229,7 @@
     const char *bytes = static_cast<const char *>(needle.bytes);
     const sptr_t needleLength = static_cast<sptr_t>(needle.length);
 
-    [self.editor message:SCI_SETSEARCHFLAGS wParam:SCFIND_MATCHCASE lParam:0];
+    [self.editor message:SCI_SETSEARCHFLAGS wParam:(self.matchCase ? SCFIND_MATCHCASE : 0) lParam:0];
 
     const sptr_t selectionStart = [self.editor message:SCI_GETSELECTIONSTART];
     const sptr_t maximum = [self.editor message:SCI_GETLENGTH];
@@ -261,7 +261,7 @@
     const char *bytes = static_cast<const char *>(needle.bytes);
     const sptr_t needleLength = static_cast<sptr_t>(needle.length);
 
-    [self.editor message:SCI_SETSEARCHFLAGS wParam:SCFIND_MATCHCASE lParam:0];
+    [self.editor message:SCI_SETSEARCHFLAGS wParam:(self.matchCase ? SCFIND_MATCHCASE : 0) lParam:0];
 
     const sptr_t minimum = 0;
     const sptr_t maximum = [self.editor message:SCI_GETLENGTH];
@@ -292,6 +292,53 @@
     [self.editor message:SCI_SCROLLCARET];
 }
 
+/// Replaces the current selection when it matches `query`, then selects the
+/// next match. Returns whether the selection was replaced.
+- (BOOL)replace:(NSString *)query with:(NSString *)replacement {
+    if (!query.length) return NO;
+    NSString *selected = self.selectedText;
+    BOOL matches = self.matchCase
+        ? [selected isEqualToString:query]
+        : ([selected caseInsensitiveCompare:query] == NSOrderedSame);
+    if (matches) {
+        NSData *replacementData = [(replacement ?: @"") dataUsingEncoding:NSUTF8StringEncoding];
+        [self.editor message:SCI_REPLACESEL wParam:0 lParam:(sptr_t)replacementData.bytes];
+        [self find:query backwards:NO];
+        return YES;
+    }
+    [self find:query backwards:NO];
+    return NO;
+}
+
+/// Replaces every match in the document, returning how many were replaced.
+- (NSInteger)replaceAll:(NSString *)query with:(NSString *)replacement {
+    if (!query.length) return 0;
+    NSData *needle = [query dataUsingEncoding:NSUTF8StringEncoding];
+    if (!needle.length) return 0;
+    NSData *replacementData = [(replacement ?: @"") dataUsingEncoding:NSUTF8StringEncoding];
+    const char *needleBytes = static_cast<const char *>(needle.bytes);
+    const sptr_t needleLength = static_cast<sptr_t>(needle.length);
+    const char *replacementBytes = static_cast<const char *>(replacementData.bytes);
+    const sptr_t replacementLength = static_cast<sptr_t>(replacementData.length);
+
+    [self.editor message:SCI_SETSEARCHFLAGS wParam:(self.matchCase ? SCFIND_MATCHCASE : 0) lParam:0];
+
+    // Each replacement removes at least one byte, so the scan always advances.
+    sptr_t position = 0;
+    NSInteger count = 0;
+    while (YES) {
+        const sptr_t maximum = [self.editor message:SCI_GETLENGTH];
+        if (position > maximum) break;
+        [self.editor message:SCI_SETTARGETRANGE wParam:position lParam:maximum];
+        const sptr_t found = (sptr_t)[self.editor message:SCI_SEARCHINTARGET wParam:needleLength lParam:(sptr_t)needleBytes];
+        if (found < 0) break;
+        [self.editor message:SCI_REPLACETARGET wParam:replacementLength lParam:(sptr_t)replacementBytes];
+        count += 1;
+        position = found + replacementLength;
+    }
+    return count;
+}
+
 - (NSInteger)caretPosition {
     return (NSInteger)[self.editor message:SCI_GETCURRENTPOS];
 }
@@ -319,6 +366,17 @@
 - (void)setFirstVisibleLine:(NSInteger)line {
     if (line < 0) return;
     [self.editor message:SCI_SETFIRSTVISIBLELINE wParam:line lParam:0];
+}
+
+- (void)goToLine:(NSInteger)line {
+    if (line < 1) return;
+    [self.editor message:SCI_GOTOLINE wParam:(uptr_t)(line - 1) lParam:0];
+    [self.editor message:SCI_SCROLLCARET];
+    [self.window makeFirstResponder:self.editor.content];
+}
+
+- (NSInteger)lineCount {
+    return (NSInteger)[self.editor message:SCI_GETLINECOUNT];
 }
 
 @end
