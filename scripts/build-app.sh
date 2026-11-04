@@ -33,6 +33,24 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <plist version="1.0">
 <dict>
   <key>CFBundleDevelopmentRegion</key><string>en</string>
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeName</key><string>Text Document</string>
+      <key>CFBundleTypeRole</key><string>Editor</string>
+      <key>LSHandlerRank</key><string>Alternate</string>
+      <key>LSItemContentTypes</key>
+      <array>
+        <string>public.text</string>
+        <string>public.plain-text</string>
+        <string>public.source-code</string>
+        <string>public.json</string>
+        <string>public.xml</string>
+        <string>public.html</string>
+        <string>public.css</string>
+      </array>
+    </dict>
+  </array>
   <key>CFBundleExecutable</key><string>CodePad16</string>
   <key>CFBundleIconFile</key><string>CodePad16</string>
   <key>CFBundleIdentifier</key><string>org.mpschahal16.codepad16</string>

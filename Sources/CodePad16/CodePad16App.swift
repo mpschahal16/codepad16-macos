@@ -112,6 +112,33 @@ struct CodePad16App: App {
 final class CodePad16AppDelegate: NSObject, NSApplicationDelegate {
     var reopenWindow: (() -> Void)?
     var saveSession: (() -> Void)?
+    /// Opens files handed over by Finder. Set once the window appears; files
+    /// opened before then are held until the window can show them.
+    var openFiles: (([URL]) -> Void)? {
+        didSet { flushPendingOpens() }
+    }
+    private var pendingOpens: [URL] = []
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        let files = urls.filter(\.isFileURL)
+        guard !files.isEmpty else { return }
+        application.activate(ignoringOtherApps: true)
+        if let openFiles {
+            openFiles(files)
+        } else {
+            pendingOpens.append(contentsOf: files)
+        }
+        if !application.windows.contains(where: { $0.isVisible }) {
+            reopenWindow?()
+        }
+    }
+
+    private func flushPendingOpens() {
+        guard let openFiles, !pendingOpens.isEmpty else { return }
+        let files = pendingOpens
+        pendingOpens.removeAll()
+        openFiles(files)
+    }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
         guard !hasVisibleWindows, let reopenWindow else { return true }
@@ -282,6 +309,25 @@ final class EditorStore: ObservableObject {
             activate(existing)
             return existing
         }
+        return loadDocument(from: url, reusingBlankDocument: false)
+    }
+
+    /// Opens files handed over by the Finder, such as Open With, dragging onto
+    /// the app icon, or `open -a CodePad16 file`. A single untouched Untitled
+    /// document is reused so opening a file does not leave an empty tab behind.
+    func openExternalFiles(_ urls: [URL]) {
+        for url in urls where url.isFileURL {
+            if let existing = documents.first(where: { $0.url == url }) {
+                activate(existing)
+                continue
+            }
+            loadDocument(from: url, reusingBlankDocument: true)
+        }
+        saveSession()
+    }
+
+    @discardableResult
+    private func loadDocument(from url: URL, reusingBlankDocument: Bool) -> EditorDocument? {
         do {
             let data = try Data(contentsOf: url)
             guard let (encoding, contents) = TextEncoding.decode(data) else {
@@ -292,6 +338,18 @@ final class EditorStore: ObservableObject {
                 return nil
             }
             captureActiveDocument?()
+            if reusingBlankDocument,
+               let active = activeDocument,
+               active.url == nil,
+               !active.isDirty,
+               active.text.isEmpty {
+                active.text = contents
+                active.encoding = encoding
+                active.markSaved(at: url)
+                activeDocumentID = active.id
+                saveSession()
+                return active
+            }
             let document = EditorDocument(text: contents, url: url, encoding: encoding)
             documents.append(document)
             activeDocumentID = document.id
@@ -503,6 +561,7 @@ struct CodePad16Window: View {
             appearance.apply()
             appDelegate.reopenWindow = { openWindow(id: "main") }
             appDelegate.saveSession = { store.saveSession() }
+            appDelegate.openFiles = { store.openExternalFiles($0) }
             store.captureActiveDocument = { [weak store] in
                 guard let store, let document = store.activeDocument else { return }
                 editorController.captureState(into: document)
