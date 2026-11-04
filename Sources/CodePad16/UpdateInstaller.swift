@@ -11,13 +11,23 @@ enum UpdateInstaller {
                 try installSynchronously(dmg: dmg)
                 DispatchQueue.main.async {
                     completion(.success(()))
-                    NSApp.terminate(nil)
+                    quitForInstall()
                 }
             } catch {
                 DispatchQueue.main.async {
                     completion(.failure(error))
                 }
             }
+        }
+    }
+
+    /// Quits the app so the install script can swap the bundle. Termination is
+    /// forced shortly afterward in case a modal sheet or a stalled save keeps
+    /// AppKit from completing it.
+    private static func quitForInstall() {
+        NSApp.terminate(nil)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            exit(EXIT_SUCCESS)
         }
     }
 
@@ -51,10 +61,26 @@ enum UpdateInstaller {
             mount="$4"
             script="$5"
             n=0
-            while kill -0 "$pid" 2>/dev/null && [ "$n" -lt 300 ]; do
+            while kill -0 "$pid" 2>/dev/null && [ "$n" -lt 100 ]; do
               sleep 0.2
               n=$((n + 1))
             done
+
+            # The app asks to quit as soon as the swap is prepared. If it is
+            # still around, ask it to terminate and then force it so the
+            # relaunch cannot re-activate the old instance.
+            if kill -0 "$pid" 2>/dev/null; then
+              kill -TERM "$pid" 2>/dev/null
+              n=0
+              while kill -0 "$pid" 2>/dev/null && [ "$n" -lt 25 ]; do
+                sleep 0.2
+                n=$((n + 1))
+              done
+            fi
+            if kill -0 "$pid" 2>/dev/null; then
+              kill -KILL "$pid" 2>/dev/null
+              sleep 0.5
+            fi
 
             cleanup() {
               /usr/bin/hdiutil detach "$mount" -quiet 2>/dev/null
