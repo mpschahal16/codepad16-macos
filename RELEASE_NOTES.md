@@ -1,5 +1,60 @@
 # CodePad16 release notes
 
+## 0.0.5
+
+Fifth prototype release for Apple Silicon macOS.
+
+### New
+
+- Replace, Replace All, and a match case option in the find bar, with match case off by default
+- Go to Line, from the Search menu or with ⌘L
+- Find in Files, a floating results panel that stays open while you open matches; results open on a single or double click, each file group collapses, and the panel can be minimized
+- The find and replace fields remember the last 10 terms in a dropdown, and clear when the find bar closes
+- Check for Updates downloads the newest release, and Install Update replaces the installed app in place before reopening it
+- CodePad16 appears in the Finder Open With menu for text and source files, including HTML, CSS, JSON, XML, and SQL, and opens the chosen file in a tab
+
+### Changed
+
+- About reads the README from GitHub and shows the installed version
+- About, Check for Updates, Release Notes, and License also appear in the macOS Help menu
+- Documented the first-launch Gatekeeper steps in the README and release notes
+
+### Included
+
+- Native macOS editor window with multiple document tabs
+- Syntax highlighting for C, C++, C#, Java, JavaScript, TypeScript, Python, Swift, HTML, CSS, JSON, XML, and SQL
+- Automatic language detection from the file extension, with a language picker in the status bar
+- UTF-8 (with or without a BOM), UTF-16, UTF-32, and ISO-8859-1 file encodings, detected on open, preserved on save, and selectable in the status bar
+- Full Unicode text, including accented characters, CJK, and emoji
+- Session restore of open tabs with cursor, scroll, language, encoding, and unsaved changes
+- Find, replace, and Find in Files across a folder
+- Line-number gutter backed by Scintilla
+- Cat app icon and current line/column status indicator
+- Reopen the editor window from the Dock after closing its last window
+- Tool runner panel for command-line agents
+- Drag-to-Applications disk image with an arranged Finder layout
+- Apple Silicon arm64 application bundle
+
+### Installing
+
+The app is ad-hoc signed and not notarized yet, so macOS may block the first launch with a message that Apple could not verify CodePad16. To open it:
+
+1. Open the downloaded disk image and drag **CodePad16** to **Applications**.
+2. Open **System Settings → Privacy & Security**, scroll to **Security**, click **Open Anyway** for CodePad16, and confirm. On macOS 14 and earlier you can also right-click CodePad16 in Finder and choose **Open**.
+3. Alternatively, remove the download quarantine in Terminal, then open the app:
+
+   ```sh
+   xattr -dr com.apple.quarantine /Applications/CodePad16.app
+   ```
+
+Later launches, and updates installed with **Help → Check for Updates**, do not show this prompt.
+
+### Limitations
+
+This is an early prototype. Plugins are not included. Swift uses the C-family lexer as an initial approximation.
+
+The README credits Notepad++ and its author for making the source available; CodePad16 is an independent project and is not an official Notepad++ release.
+
 ## 0.0.4
 
 Fourth prototype release for Apple Silicon macOS.
