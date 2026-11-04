@@ -27,9 +27,12 @@ Updates installed from **Check for Updates** inside CodePad16 do not trigger thi
 - Multiple open documents in tabs
 - New, open, save, and save as
 - Open a saved file in another application or reveal it in Finder from the File menu or a tab's context menu
+- Opens files from the Finder Open With menu, a drag onto the app icon, or the command line, reusing the empty Untitled tab
+- Check for Updates downloads the newest release and installs it in place, then reopens the app
 - A tool runner panel for OpenCode, Claude Code, Codex, Gemini CLI, or a custom command, with the active file and selection as context
 - UTF-8, UTF-16, UTF-32, and ISO-8859-1 text files, detected on open and preserved on save
-- Native Find interface (`⌘F`)
+- Native Find interface (`⌘F`) with replace, replace all, match case, and Go to Line
+- Find in Files with a floating results panel that stays open while you open matches
 - Syntax highlighting and automatic language detection for C, C++, C#, Java, JavaScript, TypeScript, Python, Swift, HTML, CSS, JSON, XML, and SQL
 - A language-mode picker for changing the detected mode
 - Scintilla line-number gutter
@@ -38,7 +41,7 @@ Updates installed from **Check for Updates** inside CodePad16 do not trigger thi
 - Encoding label and line count
 - Menu and keyboard shortcuts for common actions
 
-This is a prototype, not feature parity with Notepad++. Plugins and advanced search are not implemented yet. Swift uses the C-family lexer as an initial approximation.
+This is a prototype, not feature parity with Notepad++. Plugins are not implemented yet. Swift uses the C-family lexer as an initial approximation.
 
 ## Build on Apple Silicon
 
