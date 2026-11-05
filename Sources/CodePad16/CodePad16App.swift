@@ -97,6 +97,10 @@ struct CodePad16App: App {
                     }
                 }
                 .disabled(store.activeDocument?.url == nil)
+                Divider()
+                Button("Close All Tabs") { store.closeAll() }
+                    .keyboardShortcut("w", modifiers: [.command, .option])
+                    .disabled(store.documents.isEmpty)
             }
             CommandGroup(replacing: .help) {
                 Button("About CodePad16") { help.showAbout = true }
@@ -553,6 +557,35 @@ final class EditorStore: ObservableObject {
         saveSession()
     }
 
+    /// Closes every tab, asking once whether to save unsaved edits.
+    func closeAll() {
+        let dirty = documents.filter(\.isDirty)
+        if !dirty.isEmpty {
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = dirty.count == 1
+                ? "Save changes to \(dirty[0].title)?"
+                : "Save changes to \(dirty.count) tabs?"
+            alert.informativeText = "Your edits will be lost if you close these tabs without saving."
+            alert.addButton(withTitle: "Save All")
+            alert.addButton(withTitle: "Cancel")
+            alert.addButton(withTitle: "Discard Changes")
+            switch alert.runModal() {
+            case .alertFirstButtonReturn:
+                for document in dirty {
+                    guard save(document) else { return }
+                }
+            case .alertThirdButtonReturn:
+                break
+            default:
+                return
+            }
+        }
+
+        documents.removeAll()
+        newDocument()
+    }
+
     private func write(_ document: EditorDocument, to url: URL) -> Bool {
         guard let data = document.encoding.encode(document.text) else {
             showError(
@@ -694,6 +727,14 @@ struct CodePad16Window: View {
                     Label("Reveal in Finder", systemImage: "folder")
                 }
                 .disabled(store.activeDocument?.url == nil)
+                Divider()
+                Button {
+                    store.closeAll()
+                } label: {
+                    Label("Close All Tabs", systemImage: "xmark.circle")
+                }
+                .keyboardShortcut("w", modifiers: [.command, .option])
+                .disabled(store.documents.isEmpty)
             } label: {
                 Label("File", systemImage: "folder")
             }
@@ -994,6 +1035,8 @@ struct CodePad16Window: View {
                             store.revealInFinder(document)
                         }
                         .disabled(document.url == nil)
+                        Divider()
+                        Button("Close All Tabs") { store.closeAll() }
                     }
                 }
             }
