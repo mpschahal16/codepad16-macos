@@ -1019,28 +1019,43 @@ struct CodePad16Window: View {
     }
 
     private var tabStrip: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 0) {
-                ForEach(store.documents) { document in
-                    DocumentTab(document: document, isSelected: document.id == store.activeDocumentID) {
-                        store.activate(document)
-                    } onClose: {
-                        store.close(document)
-                    }
-                    .contextMenu {
-                        Button("Open in Other Application…") {
-                            store.openInOtherApplication(document)
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 0) {
+                    ForEach(store.documents) { document in
+                        DocumentTab(document: document, isSelected: document.id == store.activeDocumentID) {
+                            store.activate(document)
+                        } onClose: {
+                            store.close(document)
                         }
-                        Button("Reveal in Finder") {
-                            store.revealInFinder(document)
+                        .id(document.id)
+                        .contextMenu {
+                            Button("Open in Other Application…") {
+                                store.openInOtherApplication(document)
+                            }
+                            Button("Reveal in Finder") {
+                                store.revealInFinder(document)
+                            }
+                            .disabled(document.url == nil)
+                            Divider()
+                            Button("Close All Tabs") { store.closeAll() }
                         }
-                        .disabled(document.url == nil)
-                        Divider()
-                        Button("Close All Tabs") { store.closeAll() }
                     }
                 }
+                .padding(.horizontal, 8)
             }
-            .padding(.horizontal, 8)
+            .onAppear {
+                guard let id = store.activeDocumentID else { return }
+                DispatchQueue.main.async {
+                    proxy.scrollTo(id, anchor: .center)
+                }
+            }
+            .onChange(of: store.activeDocumentID) { id in
+                guard let id else { return }
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    proxy.scrollTo(id, anchor: .center)
+                }
+            }
         }
         .frame(height: 38)
         .background(Color(nsColor: .controlBackgroundColor))
