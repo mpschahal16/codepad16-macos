@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import SwiftUI
 import UniformTypeIdentifiers
 import CodePad16Editor
@@ -44,7 +45,7 @@ struct CodePad16App: App {
     @NSApplicationDelegateAdaptor(CodePad16AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        WindowGroup(id: "main") {
+        Window("CodePad16", id: "main") {
             CodePad16Window(appDelegate: appDelegate)
                 .environmentObject(store)
                 .environmentObject(appearance)
@@ -119,18 +120,80 @@ final class CodePad16AppDelegate: NSObject, NSApplicationDelegate {
     }
     private var pendingOpens: [URL] = []
 
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        installOpenDocumentsHandler()
+    }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // SwiftUI installs its own document-open handler, which closes the
+        // scene window and re-presents it for every external open. Install
+        // ours afterwards so opening a file updates the window in place.
+        installOpenDocumentsHandler()
+    }
+
     func application(_ application: NSApplication, open urls: [URL]) {
+        handleOpen(urls: urls)
+    }
+
+    /// Handles Finder's Open With, double-clicking a file, and dragging files
+    /// onto the Dock icon without letting SwiftUI tear down the window.
+    @objc private func handleOpenDocumentsEvent(
+        _ event: NSAppleEventDescriptor,
+        withReplyEvent replyEvent: NSAppleEventDescriptor
+    ) {
+        var urls: [URL] = []
+        if let list = event.paramDescriptor(forKeyword: keyDirectObject) {
+            for index in 1...max(list.numberOfItems, 0) {
+                guard let item = list.atIndex(index) else { continue }
+                if let string = item.stringValue, let url = URL(string: string) {
+                    urls.append(url)
+                } else if !item.data.isEmpty,
+                          let url = URL(dataRepresentation: item.data, relativeTo: nil) {
+                    urls.append(url)
+                }
+            }
+        }
+        handleOpen(urls: urls)
+    }
+
+    private func handleOpen(urls: [URL]) {
         let files = urls.filter(\.isFileURL)
         guard !files.isEmpty else { return }
-        application.activate(ignoringOtherApps: true)
         if let openFiles {
             openFiles(files)
+            if NSApp.windows.contains(where: { $0.isVisible }) {
+                NSApp.activate(ignoringOtherApps: true)
+            } else {
+                showWindow()
+            }
         } else {
+            // Still launching: the scene creates its window and flushes these.
             pendingOpens.append(contentsOf: files)
         }
-        if !application.windows.contains(where: { $0.isVisible }) {
-            reopenWindow?()
+    }
+
+    private func installOpenDocumentsHandler() {
+        NSAppleEventManager.shared().setEventHandler(
+            self,
+            andSelector: #selector(handleOpenDocumentsEvent(_:withReplyEvent:)),
+            forEventClass: AEEventClass(kCoreEventClass),
+            andEventID: AEEventID(kAEOpenDocuments)
+        )
+    }
+
+    /// Brings the editor window forward. Prefers an existing window so SwiftUI
+    /// does not dismiss and re-present the scene, which looks like a relaunch.
+    private func showWindow() {
+        let candidates = NSApp.windows.filter { $0.canBecomeMain && !($0 is NSPanel) }
+        if let window = candidates.first {
+            if window.isMiniaturized {
+                window.deminiaturize(nil)
+            }
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
         }
+        reopenWindow?()
     }
 
     private func flushPendingOpens() {
@@ -141,10 +204,16 @@ final class CodePad16AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
-        guard !hasVisibleWindows, let reopenWindow else { return true }
-        sender.activate(ignoringOtherApps: true)
-        reopenWindow()
+        if !hasVisibleWindows {
+            showWindow()
+        }
         return false
+    }
+
+    /// Keep the app running after its last window closes so opening a file from
+    /// Finder reuses this process and its session instead of relaunching.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
     }
 
     func applicationWillTerminate(_ notification: Notification) {
