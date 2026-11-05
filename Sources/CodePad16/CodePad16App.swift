@@ -117,6 +117,9 @@ struct CodePad16App: App {
 final class CodePad16AppDelegate: NSObject, NSApplicationDelegate {
     var reopenWindow: (() -> Void)?
     var saveSession: (() -> Void)?
+    /// The editor's window, so Finder opens can bring it to the front even if
+    /// another app is active or the window is minimized.
+    weak var editorWindow: NSWindow?
     /// Opens files handed over by Finder. Set once the window appears; files
     /// opened before then are held until the window can show them.
     var openFiles: (([URL]) -> Void)? {
@@ -163,17 +166,13 @@ final class CodePad16AppDelegate: NSObject, NSApplicationDelegate {
     private func handleOpen(urls: [URL]) {
         let files = urls.filter(\.isFileURL)
         guard !files.isEmpty else { return }
-        if let openFiles {
-            openFiles(files)
-            if NSApp.windows.contains(where: { $0.isVisible }) {
-                NSApp.activate(ignoringOtherApps: true)
-            } else {
-                showWindow()
-            }
-        } else {
+        guard let openFiles else {
             // Still launching: the scene creates its window and flushes these.
             pendingOpens.append(contentsOf: files)
+            return
         }
+        openFiles(files)
+        bringWindowForward()
     }
 
     private func installOpenDocumentsHandler() {
@@ -185,19 +184,25 @@ final class CodePad16AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
-    /// Brings the editor window forward. Prefers an existing window so SwiftUI
-    /// does not dismiss and re-present the scene, which looks like a relaunch.
-    private func showWindow() {
+    /// Brings the editor window to the front. Prefers the existing window so
+    /// SwiftUI does not dismiss and re-present the scene, which looks like a
+    /// relaunch, and un-minimizes it if it was in the Dock.
+    private func bringWindowForward() {
         let candidates = NSApp.windows.filter { $0.canBecomeMain && !($0 is NSPanel) }
-        if let window = candidates.first {
-            if window.isMiniaturized {
-                window.deminiaturize(nil)
-            }
-            window.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
+        let window = editorWindow ?? candidates.first(where: \.isVisible) ?? candidates.first
+
+        NSApp.unhide(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        guard let window else {
+            reopenWindow?()
             return
         }
-        reopenWindow?()
+        if window.isMiniaturized {
+            window.deminiaturize(nil)
+        }
+        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
+        NSRunningApplication.current.activate(options: [.activateAllWindows])
     }
 
     private func flushPendingOpens() {
@@ -205,11 +210,12 @@ final class CodePad16AppDelegate: NSObject, NSApplicationDelegate {
         let files = pendingOpens
         pendingOpens.removeAll()
         openFiles(files)
+        bringWindowForward()
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
         if !hasVisibleWindows {
-            showWindow()
+            bringWindowForward()
         }
         return false
     }
@@ -646,6 +652,7 @@ struct CodePad16Window: View {
             }
         }
         .background(Color(nsColor: .textBackgroundColor))
+        .background(WindowAccessor { appDelegate.editorWindow = $0 })
         .modifier(WindowTitleModifier(document: store.activeDocument))
         .sheet(isPresented: $help.showAbout) {
             AboutView { help.showAbout = false }
@@ -1062,6 +1069,43 @@ struct CodePad16Window: View {
         .overlay(alignment: .bottom) { Divider() }
     }
 
+}
+
+/// Resolves the NSWindow hosting the editor so the app delegate can bring it
+/// forward when a file is opened from the Finder.
+private struct WindowAccessor: NSViewRepresentable {
+    let onResolve: (NSWindow?) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onResolve: onResolve)
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async {
+            context.coordinator.update(view.window)
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.update(nsView.window)
+    }
+
+    final class Coordinator {
+        private let onResolve: (NSWindow?) -> Void
+        private weak var window: NSWindow?
+
+        init(onResolve: @escaping (NSWindow?) -> Void) {
+            self.onResolve = onResolve
+        }
+
+        func update(_ newWindow: NSWindow?) {
+            guard newWindow !== window else { return }
+            window = newWindow
+            onResolve(newWindow)
+        }
+    }
 }
 
 /// The window title follows the active document and updates when it is renamed.
