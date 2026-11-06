@@ -93,6 +93,12 @@ struct CodePad16App: App {
                 }
                 .keyboardShortcut("s", modifiers: [.command, .shift])
                 .disabled(store.activeDocument == nil)
+                Button("Rename File…") {
+                    if let document = store.activeDocument, store.rename(document) {
+                        workspace.reload()
+                    }
+                }
+                .disabled(store.activeDocument?.url == nil)
                 Divider()
                 Button("Open in Other Application…") {
                     if let document = store.activeDocument {
@@ -274,6 +280,14 @@ final class EditorDocument: ObservableObject, Identifiable {
 
     var title: String { url?.lastPathComponent ?? "Untitled" }
     var displayPath: String { url.map { ($0.path as NSString).abbreviatingWithTildeInPath } ?? "Unsaved" }
+
+    /// Points the document at a new path, such as after its file is renamed,
+    /// without touching its saved/unsaved state.
+    func updateURL(_ newURL: URL) {
+        guard url != newURL else { return }
+        url = newURL
+        languageMode = LanguageMode.detect(url: newURL)
+    }
 
     func markSaved(at newURL: URL? = nil) {
         if let newURL, url != newURL {
@@ -496,6 +510,89 @@ final class EditorStore: ObservableObject {
         return write(document, to: url)
     }
 
+    /// Asks for a new name and renames the file on disk, keeping any open
+    /// document pointed at the new path.
+    @discardableResult
+    func renameFile(at url: URL) -> Bool {
+        let alert = NSAlert()
+        alert.messageText = "Rename “\(url.lastPathComponent)”"
+        alert.informativeText = "Enter a new name for this file."
+        alert.addButton(withTitle: "Rename")
+        alert.addButton(withTitle: "Cancel")
+
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
+        field.stringValue = url.lastPathComponent
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return false }
+
+        let newName = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !newName.isEmpty, !newName.contains("/"), !newName.contains(":") else {
+            showError(
+                "Could not rename \(url.lastPathComponent)",
+                detail: "Enter a file name without slashes or colons."
+            )
+            return false
+        }
+        guard newName != url.lastPathComponent else { return false }
+
+        let target = url.deletingLastPathComponent().appendingPathComponent(newName)
+        // On a case-insensitive file system, "abc" and "ABC" are the same file;
+        // renaming only the case needs a detour through a temporary name.
+        let caseOnlyRename = target.path.lowercased() == url.path.lowercased()
+
+        if !caseOnlyRename, FileManager.default.fileExists(atPath: target.path) {
+            let confirm = NSAlert()
+            confirm.alertStyle = .warning
+            confirm.messageText = "“\(newName)” already exists."
+            confirm.informativeText = "Replacing it cannot be undone."
+            confirm.addButton(withTitle: "Replace")
+            confirm.addButton(withTitle: "Cancel")
+            guard confirm.runModal() == .alertFirstButtonReturn else { return false }
+        }
+
+        do {
+            try Self.moveFile(at: url, to: target)
+        } catch {
+            showError("Could not rename \(url.lastPathComponent)", detail: error.localizedDescription)
+            return false
+        }
+
+        for document in documents where document.url == url {
+            document.updateURL(target)
+        }
+        saveSession()
+        return true
+    }
+
+    /// Moves a file to a new path in the same folder, replacing an existing
+    /// file and routing case-only renames through a temporary name so they
+    /// work on case-insensitive volumes.
+    static func moveFile(at url: URL, to target: URL) throws {
+        let manager = FileManager.default
+        let caseOnlyRename = target.path.lowercased() == url.path.lowercased()
+
+        if !caseOnlyRename, manager.fileExists(atPath: target.path) {
+            try manager.removeItem(at: target)
+        }
+
+        if caseOnlyRename {
+            let temporary = url.deletingLastPathComponent()
+                .appendingPathComponent(".codepad16-rename-\(UUID().uuidString)")
+            try manager.moveItem(at: url, to: temporary)
+            try manager.moveItem(at: temporary, to: target)
+        } else {
+            try manager.moveItem(at: url, to: target)
+        }
+    }
+
+    @discardableResult
+    func rename(_ document: EditorDocument) -> Bool {
+        guard let url = document.url else { return false }
+        return renameFile(at: url)
+    }
+
     /// Saves pending changes, then lets the user pick an application to open
     /// the file with. Useful for previewing markup or handing a file off to
     /// another editor.
@@ -651,9 +748,13 @@ struct CodePad16Window: View {
             }
             HSplitView {
                 if !workspace.roots.isEmpty {
-                    WorkspaceSidebar(workspace: workspace) { url in
-                        store.openFile(at: url)
-                    }
+                    WorkspaceSidebar(
+                        workspace: workspace,
+                        onOpenFile: { url in store.openFile(at: url) },
+                        onRenameFile: { url in
+                            if store.renameFile(at: url) { workspace.reload() }
+                        }
+                    )
                 }
                 editorContent
                 if tools.isPanelVisible {
@@ -744,6 +845,14 @@ struct CodePad16Window: View {
                 }
                 .keyboardShortcut("s", modifiers: [.command, .shift])
                 .disabled(store.activeDocument == nil)
+                Button {
+                    if let document = store.activeDocument, store.rename(document) {
+                        workspace.reload()
+                    }
+                } label: {
+                    Label("Rename File…", systemImage: "pencil")
+                }
+                .disabled(store.activeDocument?.url == nil)
                 Divider()
                 Button {
                     if let document = store.activeDocument { store.openInOtherApplication(document) }
@@ -1064,6 +1173,10 @@ struct CodePad16Window: View {
                             Button("Open in Other Application…") {
                                 store.openInOtherApplication(document)
                             }
+                            Button("Rename File…") {
+                                if store.rename(document) { workspace.reload() }
+                            }
+                            .disabled(document.url == nil)
                             Button("Reveal in Finder") {
                                 store.revealInFinder(document)
                             }

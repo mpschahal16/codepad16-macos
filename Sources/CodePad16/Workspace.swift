@@ -135,6 +135,7 @@ final class Workspace: ObservableObject {
 struct WorkspaceSidebar: View {
     @ObservedObject var workspace: Workspace
     let onOpenFile: (URL) -> Void
+    let onRenameFile: (URL) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -148,7 +149,8 @@ struct WorkspaceSidebar: View {
                                 root: root,
                                 workspace: workspace,
                                 minWidth: proxy.size.width,
-                                onOpenFile: onOpenFile
+                                onOpenFile: onOpenFile,
+                                onRenameFile: onRenameFile
                             )
                         }
                     }
@@ -188,6 +190,7 @@ private struct WorkspaceRootSection: View {
     @ObservedObject var workspace: Workspace
     let minWidth: CGFloat
     let onOpenFile: (URL) -> Void
+    let onRenameFile: (URL) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -253,7 +256,8 @@ private struct WorkspaceRootSection: View {
                             depth: 1,
                             workspace: workspace,
                             minWidth: minWidth,
-                            onOpenFile: onOpenFile
+                            onOpenFile: onOpenFile,
+                            onRenameFile: onRenameFile
                         )
                     }
                 }
@@ -268,6 +272,7 @@ private struct WorkspaceNodeRow: View {
     @ObservedObject var workspace: Workspace
     let minWidth: CGFloat
     let onOpenFile: (URL) -> Void
+    let onRenameFile: (URL) -> Void
 
     var body: some View {
         if entry.isDirectory {
@@ -291,7 +296,8 @@ private struct WorkspaceNodeRow: View {
                             depth: depth + 1,
                             workspace: workspace,
                             minWidth: minWidth,
-                            onOpenFile: onOpenFile
+                            onOpenFile: onOpenFile,
+                            onRenameFile: onRenameFile
                         )
                     }
                 }
@@ -302,6 +308,7 @@ private struct WorkspaceNodeRow: View {
             }
             .contextMenu {
                 Button("Open") { onOpenFile(entry.url) }
+                Button("Rename…") { onRenameFile(entry.url) }
                 Button("Reveal in Finder") {
                     NSWorkspace.shared.activateFileViewerSelecting([entry.url])
                 }
