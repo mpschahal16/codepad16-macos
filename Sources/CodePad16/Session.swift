@@ -8,6 +8,8 @@ struct SessionState: Codable {
         /// Contents kept only when the document has unsaved changes.
         var text: String?
         var isDirty: Bool
+        /// Optional so sessions saved before pinned tabs existed still load.
+        var isPinned: Bool?
         var encodingID: String
         var languageID: String
         var caretPosition: Int

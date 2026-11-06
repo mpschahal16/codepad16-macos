@@ -261,6 +261,9 @@ final class EditorDocument: ObservableObject, Identifiable {
     @Published var languageMode: LanguageMode
     @Published var encoding: TextEncoding
     @Published var url: URL?
+    /// Pinned tabs stay at the left of the tab strip and cannot be closed with
+    /// the tab's close button.
+    @Published var isPinned: Bool
     /// Last caret offset and scroll position, updated while the document is shown.
     var caretPosition = 0
     var firstVisibleLine = 0
@@ -273,13 +276,15 @@ final class EditorDocument: ObservableObject, Identifiable {
         text: String = "",
         url: URL? = nil,
         encoding: TextEncoding = .utf8,
-        languageMode: LanguageMode? = nil
+        languageMode: LanguageMode? = nil,
+        isPinned: Bool = false
     ) {
         self.text = text
         self.savedText = text
         self.url = url
         self.encoding = encoding
         self.languageMode = languageMode ?? LanguageMode.detect(url: url)
+        self.isPinned = isPinned
         self.lineCount = Self.countLines(in: text)
     }
 
@@ -341,7 +346,8 @@ final class EditorStore: ObservableObject {
                 guard FileManager.default.fileExists(atPath: url.path) else { continue }
                 if entry.isDirty, let text = entry.text {
                     let document = EditorDocument(
-                        text: text, url: url, encoding: encoding, languageMode: language
+                        text: text, url: url, encoding: encoding, languageMode: language,
+                        isPinned: entry.isPinned ?? false
                     )
                     document.isDirty = true
                     document.caretPosition = entry.caretPosition
@@ -350,7 +356,8 @@ final class EditorStore: ObservableObject {
                 } else if let data = try? Data(contentsOf: url),
                           let (detectedEncoding, text) = TextEncoding.decode(data) {
                     let document = EditorDocument(
-                        text: text, url: url, encoding: detectedEncoding, languageMode: language
+                        text: text, url: url, encoding: detectedEncoding, languageMode: language,
+                        isPinned: entry.isPinned ?? false
                     )
                     document.caretPosition = entry.caretPosition
                     document.firstVisibleLine = entry.firstVisibleLine
@@ -359,7 +366,8 @@ final class EditorStore: ObservableObject {
             } else {
                 let text = entry.text ?? ""
                 let document = EditorDocument(
-                    text: text, url: nil, encoding: encoding, languageMode: language
+                    text: text, url: nil, encoding: encoding, languageMode: language,
+                    isPinned: entry.isPinned ?? false
                 )
                 document.isDirty = !text.isEmpty
                 document.caretPosition = entry.caretPosition
@@ -378,6 +386,7 @@ final class EditorStore: ObservableObject {
                 url: document.url?.absoluteString,
                 text: (document.isDirty || document.url == nil) ? document.text : nil,
                 isDirty: document.isDirty,
+                isPinned: document.isPinned,
                 encodingID: document.encoding.id,
                 languageID: document.languageMode.id,
                 caretPosition: document.caretPosition,
@@ -405,6 +414,17 @@ final class EditorStore: ObservableObject {
             captureActiveDocument?()
         }
         activeDocumentID = document.id
+        saveSession()
+    }
+
+    /// Pins or unpins a tab. Pinned tabs are kept at the left of the strip.
+    func togglePin(_ document: EditorDocument) {
+        guard let index = documents.firstIndex(where: { $0.id == document.id }) else { return }
+        document.isPinned.toggle()
+        documents.remove(at: index)
+        // Insert at the boundary between pinned and unpinned tabs.
+        let insertion = documents.firstIndex { !$0.isPinned } ?? documents.count
+        documents.insert(document, at: insertion)
         saveSession()
     }
 
@@ -744,7 +764,9 @@ final class EditorStore: ObservableObject {
 
     /// Closes every tab, asking once whether to save unsaved edits.
     func closeAll() {
-        let dirty = documents.filter(\.isDirty)
+        let closable = documents.filter { !$0.isPinned }
+        guard !closable.isEmpty else { return }
+        let dirty = closable.filter(\.isDirty)
         if !dirty.isEmpty {
             let alert = NSAlert()
             alert.alertStyle = .warning
@@ -767,8 +789,14 @@ final class EditorStore: ObservableObject {
             }
         }
 
-        documents.removeAll()
-        newDocument()
+        let closedActive = activeDocument?.isPinned == false
+        documents.removeAll { !$0.isPinned }
+        if documents.isEmpty {
+            newDocument()
+            return
+        }
+        if closedActive { activeDocumentID = documents.last?.id }
+        saveSession()
     }
 
     private func write(_ document: EditorDocument, to url: URL) -> Bool {
@@ -1259,9 +1287,20 @@ struct CodePad16Window: View {
                             store.activate(document)
                         } onClose: {
                             store.close(document)
+                        } onTogglePin: {
+                            store.togglePin(document)
                         }
                         .id(document.id)
                         .contextMenu {
+                            Button {
+                                store.togglePin(document)
+                            } label: {
+                                Label(
+                                    document.isPinned ? "Unpin Tab" : "Pin Tab",
+                                    systemImage: document.isPinned ? "pin.slash" : "pin"
+                                )
+                            }
+                            Divider()
                             Button("Save") { store.save(document) }
                             Button("Save As…") { store.saveAs(document) }
                             Button("Save a Copy As…") { store.saveCopyAs(document) }
@@ -1438,9 +1477,11 @@ struct DocumentTab: View {
     let isSelected: Bool
     let onSelect: () -> Void
     let onClose: () -> Void
+    let onTogglePin: () -> Void
 
     var body: some View {
         HStack(spacing: 7) {
+            pinButton
             if document.isDirty {
                 Circle().fill(Color.accentColor).frame(width: 6, height: 6)
             }
@@ -1464,6 +1505,19 @@ struct DocumentTab: View {
             if isSelected { Rectangle().fill(Color.accentColor).frame(height: 2) }
         }
         .help(document.url?.path ?? "This document has not been saved yet")
+    }
+
+    /// Pin button beside the file name, for pinning and unpinning the tab.
+    private var pinButton: some View {
+        Button(action: onTogglePin) {
+            Image(systemName: document.isPinned ? "pin.fill" : "pin")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(document.isPinned ? Color.accentColor : Color.secondary)
+                .frame(width: 14, height: 16)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(document.isPinned ? "Unpin tab" : "Pin tab")
     }
 }
 
