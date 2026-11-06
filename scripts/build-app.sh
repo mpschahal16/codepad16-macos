@@ -64,6 +64,14 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSPrincipalClass</key><string>NSApplication</string>
+  <key>UTExportedTypeDeclarations</key>
+  <array>
+    <dict>
+      <key>UTTypeIdentifier</key><string>org.mpschahal16.codepad16.tab</string>
+      <key>UTTypeDescription</key><string>CodePad16 Tab</string>
+      <key>UTTypeConformsTo</key><array><string>public.data</string></array>
+    </dict>
+  </array>
 </dict>
 </plist>
 PLIST

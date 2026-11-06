@@ -4,6 +4,10 @@ import SwiftUI
 import UniformTypeIdentifiers
 import CodePad16Editor
 
+/// Drag type used to reorder tabs. Restricting it to this process keeps a tab
+/// drag from being treated as text by the editor or other applications.
+private let tabDragType = UTType(exportedAs: "org.mpschahal16.codepad16.tab")
+
 struct LanguageMode: Identifiable, Hashable {
     let id: String
     let name: String
@@ -424,6 +428,35 @@ final class EditorStore: ObservableObject {
         documents.remove(at: index)
         // Insert at the boundary between pinned and unpinned tabs.
         let insertion = documents.firstIndex { !$0.isPinned } ?? documents.count
+        documents.insert(document, at: insertion)
+        saveSession()
+    }
+
+    /// Moves a dragged tab to the end of the strip, used when it is dropped in
+    /// the empty space after the last tab.
+    func moveTabToEnd(id: UUID) {
+        guard let from = documents.firstIndex(where: { $0.id == id }) else { return }
+        let document = documents.remove(at: from)
+        document.isPinned = false
+        documents.append(document)
+        saveSession()
+    }
+
+    /// Moves a dragged tab to where it was dropped: before or after the tab
+    /// under the pointer. Dropping across the pinned boundary adopts the
+    /// target tab's pinned state so the drop always lands where it was made.
+    func moveTab(id: UUID, relativeTo targetID: UUID, after: Bool) {
+        guard id != targetID,
+              let from = documents.firstIndex(where: { $0.id == id }),
+              let targetIndex = documents.firstIndex(where: { $0.id == targetID }) else { return }
+
+        let document = documents[from]
+        let targetIsPinned = documents[targetIndex].isPinned
+        let shiftedTarget = targetIndex - (from < targetIndex ? 1 : 0)
+
+        document.isPinned = targetIsPinned
+        documents.remove(at: from)
+        let insertion = min(max(after ? shiftedTarget + 1 : shiftedTarget, 0), documents.count)
         documents.insert(document, at: insertion)
         saveSession()
     }
@@ -1278,6 +1311,11 @@ struct CodePad16Window: View {
         .overlay(alignment: .bottom) { Divider() }
     }
 
+    private func recordTabWidth(_ id: UUID, _ width: CGFloat) {
+        guard windowState.tabWidths[id] != width else { return }
+        windowState.tabWidths[id] = width
+    }
+
     private var tabStrip: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
@@ -1291,6 +1329,36 @@ struct CodePad16Window: View {
                             store.togglePin(document)
                         }
                         .id(document.id)
+                        .onDrag {
+                            let provider = NSItemProvider()
+                            provider.registerDataRepresentation(
+                                forTypeIdentifier: tabDragType.identifier,
+                                visibility: .ownProcess
+                            ) { completion in
+                                completion(document.id.uuidString.data(using: .utf8), nil)
+                                return nil
+                            }
+                            return provider
+                        }
+                        .onDrop(
+                            of: [tabDragType],
+                            delegate: TabDropDelegate(
+                                target: document,
+                                width: windowState.tabWidths[document.id] ?? 0,
+                                store: store
+                            )
+                        )
+                        .background(
+                            GeometryReader { proxy in
+                                Color.clear
+                                    .onAppear {
+                                        recordTabWidth(document.id, proxy.size.width)
+                                    }
+                                    .onChange(of: proxy.size.width) { width in
+                                        recordTabWidth(document.id, width)
+                                    }
+                            }
+                        )
                         .contextMenu {
                             Button {
                                 store.togglePin(document)
@@ -1324,6 +1392,10 @@ struct CodePad16Window: View {
                 }
                 .padding(.horizontal, 8)
             }
+            .onDrop(
+                of: [tabDragType],
+                delegate: TabStripDropDelegate(store: store)
+            )
             .onAppear {
                 guard let id = store.activeDocumentID else { return }
                 DispatchQueue.main.async {
@@ -1521,6 +1593,63 @@ struct DocumentTab: View {
     }
 }
 
+/// Handles a tab dropped onto another tab. The drop lands before or after the
+/// tab depending on which half of it the pointer is over.
+private struct TabDropDelegate: DropDelegate {
+    let target: EditorDocument
+    let width: CGFloat
+    let store: EditorStore
+
+    func validateDrop(info: DropInfo) -> Bool {
+        info.hasItemsConforming(to: [tabDragType])
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        guard let provider = info.itemProviders(for: [tabDragType]).first else { return false }
+        let after = width > 0 && info.location.x > width / 2
+        provider.loadDataRepresentation(forTypeIdentifier: tabDragType.identifier) { data, _ in
+            guard let data,
+                  let string = String(data: data, encoding: .utf8),
+                  let draggedID = UUID(uuidString: string) else { return }
+            Task { @MainActor in
+                store.moveTab(id: draggedID, relativeTo: target.id, after: after)
+            }
+        }
+        return true
+    }
+}
+
+/// Handles a tab dropped in the empty space after the last tab, moving it to
+/// the end of the strip.
+private struct TabStripDropDelegate: DropDelegate {
+    let store: EditorStore
+
+    func validateDrop(info: DropInfo) -> Bool {
+        info.hasItemsConforming(to: [tabDragType])
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        guard let provider = info.itemProviders(for: [tabDragType]).first else { return false }
+        provider.loadDataRepresentation(forTypeIdentifier: tabDragType.identifier) { data, _ in
+            guard let data,
+                  let string = String(data: data, encoding: .utf8),
+                  let draggedID = UUID(uuidString: string) else { return }
+            Task { @MainActor in
+                store.moveTabToEnd(id: draggedID)
+            }
+        }
+        return true
+    }
+}
+
 struct EditorPane: View {
     @ObservedObject var document: EditorDocument
     let controller: EditorController
@@ -1546,6 +1675,9 @@ final class WindowState: ObservableObject {
     @Published var replaceQuery = ""
     @Published var replaceStatus = ""
     var findInFilesPanel: NSPanel?
+    /// Widths of the tabs in the strip, used to decide which half of a tab a
+    /// drag was dropped on.
+    @Published var tabWidths: [UUID: CGFloat] = [:]
     @Published private(set) var findHistory: [String]
     @Published private(set) var replaceHistory: [String]
 
