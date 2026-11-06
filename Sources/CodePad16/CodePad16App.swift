@@ -37,6 +37,7 @@ struct LanguageMode: Identifiable, Hashable {
 @main
 struct CodePad16App: App {
     @StateObject private var store = EditorStore()
+    @StateObject private var workspace = Workspace()
     @StateObject private var appearance = AppearanceSettings()
     @StateObject private var options = EditorOptions()
     @StateObject private var tools = ToolRunner()
@@ -48,6 +49,7 @@ struct CodePad16App: App {
         Window("CodePad16", id: "main") {
             CodePad16Window(appDelegate: appDelegate)
                 .environmentObject(store)
+                .environmentObject(workspace)
                 .environmentObject(appearance)
                 .environmentObject(options)
                 .environmentObject(tools)
@@ -72,6 +74,13 @@ struct CodePad16App: App {
                     .keyboardShortcut("n", modifiers: .command)
                 Button("Open…") { store.openFiles() }
                     .keyboardShortcut("o", modifiers: .command)
+            }
+            CommandGroup(after: .newItem) {
+                Divider()
+                Button("Open Folder as Workspace…") { workspace.chooseFolder() }
+                    .keyboardShortcut("o", modifiers: [.command, .option])
+                Button("Close All Workspaces") { workspace.close() }
+                    .disabled(workspace.roots.isEmpty)
             }
             CommandGroup(replacing: .saveItem) {
                 Button("Save") {
@@ -623,6 +632,7 @@ final class EditorStore: ObservableObject {
 struct CodePad16Window: View {
     let appDelegate: CodePad16AppDelegate
     @EnvironmentObject private var store: EditorStore
+    @EnvironmentObject private var workspace: Workspace
     @EnvironmentObject private var appearance: AppearanceSettings
     @EnvironmentObject private var options: EditorOptions
     @EnvironmentObject private var tools: ToolRunner
@@ -640,6 +650,11 @@ struct CodePad16Window: View {
                 findBar
             }
             HSplitView {
+                if !workspace.roots.isEmpty {
+                    WorkspaceSidebar(workspace: workspace) { url in
+                        store.openFile(at: url)
+                    }
+                }
                 editorContent
                 if tools.isPanelVisible {
                     ToolRunnerPanel(
@@ -706,6 +721,14 @@ struct CodePad16Window: View {
                     .keyboardShortcut("n", modifiers: .command)
                 Button { store.openFiles() } label: { Label("Open…", systemImage: "folder") }
                     .keyboardShortcut("o", modifiers: .command)
+                Button { workspace.chooseFolder() } label: {
+                    Label("Open Folder as Workspace…", systemImage: "folder.badge.plus")
+                }
+                .keyboardShortcut("o", modifiers: [.command, .option])
+                Button { workspace.close() } label: {
+                    Label("Close All Workspaces", systemImage: "xmark.circle")
+                }
+                .disabled(workspace.roots.isEmpty)
                 Divider()
                 Button {
                     if let document = store.activeDocument { store.save(document) }
@@ -898,6 +921,7 @@ struct CodePad16Window: View {
         panel.isReleasedWhenClosed = false
         panel.hidesOnDeactivate = false
         panel.contentView = NSHostingView(rootView: FindInFilesView(
+            initialFolder: workspace.roots.first,
             onClose: { [weak panel] in panel?.close() },
             onOpen: { url, line in openSearchResult(url, line: line) }
         ))

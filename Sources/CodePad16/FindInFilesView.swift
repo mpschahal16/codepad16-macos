@@ -6,8 +6,18 @@ struct FindInFilesView: View {
     let onClose: () -> Void
     let onOpen: (URL, Int) -> Void
 
-    @StateObject private var model = FindInFilesModel()
+    @StateObject private var model: FindInFilesModel
     @StateObject private var collapse = FileCollapseState()
+
+    init(
+        initialFolder: URL? = nil,
+        onClose: @escaping () -> Void,
+        onOpen: @escaping (URL, Int) -> Void
+    ) {
+        self.onClose = onClose
+        self.onOpen = onOpen
+        _model = StateObject(wrappedValue: FindInFilesModel(initialFolder: initialFolder))
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -227,6 +237,13 @@ final class FindInFilesModel: ObservableObject {
     @Published var status = "Choose a folder and enter a search term."
 
     private var searchTask: Task<Void, Never>?
+
+    init(initialFolder: URL? = nil) {
+        folder = initialFolder
+        if let initialFolder {
+            status = "Ready to search \(initialFolder.lastPathComponent)."
+        }
+    }
 
     func chooseFolder() {
         let panel = NSOpenPanel()
