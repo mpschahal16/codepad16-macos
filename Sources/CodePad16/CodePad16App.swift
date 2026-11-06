@@ -93,6 +93,11 @@ struct CodePad16App: App {
                 }
                 .keyboardShortcut("s", modifiers: [.command, .shift])
                 .disabled(store.activeDocument == nil)
+                Button("Save a Copy As…") {
+                    if let document = store.activeDocument { store.saveCopyAs(document) }
+                }
+                .keyboardShortcut("s", modifiers: [.command, .option])
+                .disabled(store.activeDocument == nil)
                 Button("Rename File…") {
                     if let document = store.activeDocument, store.rename(document) {
                         workspace.reload()
@@ -510,6 +515,34 @@ final class EditorStore: ObservableObject {
         return write(document, to: url)
     }
 
+    /// Writes the current contents to a new file without moving the open
+    /// document or changing whether it has unsaved changes.
+    @discardableResult
+    func saveCopyAs(_ document: EditorDocument) -> Bool {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.item]
+        panel.title = "Save a Copy"
+        panel.message = "The open tab keeps its current file."
+        panel.prompt = "Save"
+        panel.nameFieldStringValue = document.title == "Untitled" ? "Untitled.txt" : document.title
+        guard panel.runModal() == .OK, let url = panel.url else { return false }
+
+        guard let data = document.encoding.encode(document.text) else {
+            showError(
+                "Could not save \(url.lastPathComponent)",
+                detail: "Some characters cannot be represented in \(document.encoding.name). Choose UTF-8 in the status bar and try again."
+            )
+            return false
+        }
+        do {
+            try data.write(to: url, options: .atomic)
+            return true
+        } catch {
+            showError("Could not save \(url.lastPathComponent)", detail: error.localizedDescription)
+            return false
+        }
+    }
+
     /// Asks for a new name and renames the file on disk, keeping any open
     /// document pointed at the new path.
     @discardableResult
@@ -591,6 +624,46 @@ final class EditorStore: ObservableObject {
     func rename(_ document: EditorDocument) -> Bool {
         guard let url = document.url else { return false }
         return renameFile(at: url)
+    }
+
+    /// Saves a copy of a file that may not be open, using the open buffer when
+    /// there is one so unsaved edits are included.
+    @discardableResult
+    func saveCopyOfFile(at url: URL) -> Bool {
+        if let document = documents.first(where: { $0.url == url }) {
+            return saveCopyAs(document)
+        }
+        guard let data = try? Data(contentsOf: url) else {
+            showError("Could not copy \(url.lastPathComponent)", detail: "The file could not be read.")
+            return false
+        }
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.item]
+        panel.title = "Save a Copy"
+        panel.message = "The original file is left unchanged."
+        panel.prompt = "Save"
+        panel.nameFieldStringValue = url.lastPathComponent
+        guard panel.runModal() == .OK, let target = panel.url else { return false }
+        do {
+            try data.write(to: target, options: .atomic)
+            return true
+        } catch {
+            showError("Could not save \(target.lastPathComponent)", detail: error.localizedDescription)
+            return false
+        }
+    }
+
+    func isOpen(_ url: URL) -> Bool {
+        document(at: url) != nil
+    }
+
+    func document(at url: URL) -> EditorDocument? {
+        documents.first { $0.url == url }
+    }
+
+    func closeFile(at url: URL) {
+        guard let document = documents.first(where: { $0.url == url }) else { return }
+        close(document)
     }
 
     /// Saves pending changes, then lets the user pick an application to open
@@ -751,9 +824,21 @@ struct CodePad16Window: View {
                     WorkspaceSidebar(
                         workspace: workspace,
                         onOpenFile: { url in store.openFile(at: url) },
+                        onSave: { url in
+                            if let document = store.document(at: url) { store.save(document) }
+                        },
+                        onSaveAs: { url in
+                            if let document = store.document(at: url),
+                               store.saveAs(document) {
+                                workspace.reload()
+                            }
+                        },
+                        onSaveCopy: { url in store.saveCopyOfFile(at: url) },
                         onRenameFile: { url in
                             if store.renameFile(at: url) { workspace.reload() }
-                        }
+                        },
+                        onCloseFile: { url in store.closeFile(at: url) },
+                        isFileOpen: { url in store.isOpen(url) }
                     )
                 }
                 editorContent
@@ -844,6 +929,13 @@ struct CodePad16Window: View {
                     Label("Save As…", systemImage: "square.and.arrow.down.on.square")
                 }
                 .keyboardShortcut("s", modifiers: [.command, .shift])
+                .disabled(store.activeDocument == nil)
+                Button {
+                    if let document = store.activeDocument { store.saveCopyAs(document) }
+                } label: {
+                    Label("Save a Copy As…", systemImage: "doc.on.doc")
+                }
+                .keyboardShortcut("s", modifiers: [.command, .option])
                 .disabled(store.activeDocument == nil)
                 Button {
                     if let document = store.activeDocument, store.rename(document) {
@@ -1170,18 +1262,23 @@ struct CodePad16Window: View {
                         }
                         .id(document.id)
                         .contextMenu {
-                            Button("Open in Other Application…") {
-                                store.openInOtherApplication(document)
-                            }
+                            Button("Save") { store.save(document) }
+                            Button("Save As…") { store.saveAs(document) }
+                            Button("Save a Copy As…") { store.saveCopyAs(document) }
+                            Divider()
                             Button("Rename File…") {
                                 if store.rename(document) { workspace.reload() }
                             }
                             .disabled(document.url == nil)
+                            Button("Open in Other Application…") {
+                                store.openInOtherApplication(document)
+                            }
                             Button("Reveal in Finder") {
                                 store.revealInFinder(document)
                             }
                             .disabled(document.url == nil)
                             Divider()
+                            Button("Close Tab") { store.close(document) }
                             Button("Close All Tabs") { store.closeAll() }
                         }
                     }

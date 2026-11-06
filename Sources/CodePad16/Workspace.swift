@@ -135,7 +135,12 @@ final class Workspace: ObservableObject {
 struct WorkspaceSidebar: View {
     @ObservedObject var workspace: Workspace
     let onOpenFile: (URL) -> Void
+    let onSave: (URL) -> Void
+    let onSaveAs: (URL) -> Void
+    let onSaveCopy: (URL) -> Void
     let onRenameFile: (URL) -> Void
+    let onCloseFile: (URL) -> Void
+    let isFileOpen: (URL) -> Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -150,7 +155,12 @@ struct WorkspaceSidebar: View {
                                 workspace: workspace,
                                 minWidth: proxy.size.width,
                                 onOpenFile: onOpenFile,
-                                onRenameFile: onRenameFile
+                                onSave: onSave,
+                                onSaveAs: onSaveAs,
+                                onSaveCopy: onSaveCopy,
+                                onRenameFile: onRenameFile,
+                                onCloseFile: onCloseFile,
+                                isFileOpen: isFileOpen
                             )
                         }
                     }
@@ -173,12 +183,33 @@ struct WorkspaceSidebar: View {
             }
             .buttonStyle(.plain)
             .help("Add a folder to the workspace")
-            Button { workspace.reload() } label: {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 10, weight: .semibold))
+            Menu {
+                Button { workspace.chooseFolder() } label: {
+                    Label("Add Folder…", systemImage: "plus")
+                }
+                Button { workspace.reload() } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
+                if let first = workspace.roots.first {
+                    Button {
+                        NSWorkspace.shared.activateFileViewerSelecting([first])
+                    } label: {
+                        Label("Reveal in Finder", systemImage: "folder")
+                    }
+                }
+                Divider()
+                Button { workspace.close() } label: {
+                    Label("Close All Workspaces", systemImage: "xmark.circle")
+                }
+                .disabled(workspace.roots.isEmpty)
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .font(.system(size: 11, weight: .semibold))
             }
-            .buttonStyle(.plain)
-            .help("Refresh workspaces")
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Workspace actions")
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 9)
@@ -190,7 +221,12 @@ private struct WorkspaceRootSection: View {
     @ObservedObject var workspace: Workspace
     let minWidth: CGFloat
     let onOpenFile: (URL) -> Void
+    let onSave: (URL) -> Void
+    let onSaveAs: (URL) -> Void
+    let onSaveCopy: (URL) -> Void
     let onRenameFile: (URL) -> Void
+    let onCloseFile: (URL) -> Void
+    let isFileOpen: (URL) -> Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -257,7 +293,12 @@ private struct WorkspaceRootSection: View {
                             workspace: workspace,
                             minWidth: minWidth,
                             onOpenFile: onOpenFile,
-                            onRenameFile: onRenameFile
+                            onSave: onSave,
+                            onSaveAs: onSaveAs,
+                            onSaveCopy: onSaveCopy,
+                            onRenameFile: onRenameFile,
+                            onCloseFile: onCloseFile,
+                            isFileOpen: isFileOpen
                         )
                     }
                 }
@@ -272,7 +313,12 @@ private struct WorkspaceNodeRow: View {
     @ObservedObject var workspace: Workspace
     let minWidth: CGFloat
     let onOpenFile: (URL) -> Void
+    let onSave: (URL) -> Void
+    let onSaveAs: (URL) -> Void
+    let onSaveCopy: (URL) -> Void
     let onRenameFile: (URL) -> Void
+    let onCloseFile: (URL) -> Void
+    let isFileOpen: (URL) -> Bool
 
     var body: some View {
         if entry.isDirectory {
@@ -297,7 +343,12 @@ private struct WorkspaceNodeRow: View {
                             workspace: workspace,
                             minWidth: minWidth,
                             onOpenFile: onOpenFile,
-                            onRenameFile: onRenameFile
+                            onSave: onSave,
+                            onSaveAs: onSaveAs,
+                            onSaveCopy: onSaveCopy,
+                            onRenameFile: onRenameFile,
+                            onCloseFile: onCloseFile,
+                            isFileOpen: isFileOpen
                         )
                     }
                 }
@@ -308,10 +359,18 @@ private struct WorkspaceNodeRow: View {
             }
             .contextMenu {
                 Button("Open") { onOpenFile(entry.url) }
+                Button("Save") { onSave(entry.url) }
+                    .disabled(!isFileOpen(entry.url))
+                Button("Save As…") { onSaveAs(entry.url) }
+                    .disabled(!isFileOpen(entry.url))
+                Button("Save a Copy As…") { onSaveCopy(entry.url) }
                 Button("Rename…") { onRenameFile(entry.url) }
                 Button("Reveal in Finder") {
                     NSWorkspace.shared.activateFileViewerSelecting([entry.url])
                 }
+                Divider()
+                Button("Close Tab") { onCloseFile(entry.url) }
+                    .disabled(!isFileOpen(entry.url))
             }
         }
     }
