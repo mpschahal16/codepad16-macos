@@ -1357,95 +1357,104 @@ struct CodePad16Window: View {
     }
 
     private var tabStrip: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 0) {
-                    ForEach(store.documents) { document in
-                        DocumentTab(document: document, isSelected: document.id == store.activeDocumentID) {
-                            store.activate(document)
-                        } onClose: {
-                            store.close(document)
-                        } onTogglePin: {
-                            store.togglePin(document)
-                        }
-                        .id(document.id)
-                        .onDrag {
-                            let provider = NSItemProvider()
-                            provider.registerDataRepresentation(
-                                forTypeIdentifier: tabDragType.identifier,
-                                visibility: .ownProcess
-                            ) { completion in
-                                completion(document.id.uuidString.data(using: .utf8), nil)
-                                return nil
-                            }
-                            return provider
-                        }
-                        .onDrop(
-                            of: [tabDragType],
-                            delegate: TabDropDelegate(
-                                target: document,
-                                width: windowState.tabWidths[document.id] ?? 0,
-                                store: store
-                            )
-                        )
-                        .background(
-                            GeometryReader { proxy in
-                                Color.clear
-                                    .onAppear {
-                                        recordTabWidth(document.id, proxy.size.width)
-                                    }
-                                    .onChange(of: proxy.size.width) { width in
-                                        recordTabWidth(document.id, width)
-                                    }
-                            }
-                        )
-                        .contextMenu {
-                            Button {
+        GeometryReader { geometry in
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 0) {
+                        ForEach(store.documents) { document in
+                            DocumentTab(document: document, isSelected: document.id == store.activeDocumentID) {
+                                store.activate(document)
+                            } onClose: {
+                                store.close(document)
+                            } onTogglePin: {
                                 store.togglePin(document)
-                            } label: {
-                                Label(
-                                    localization.t(document.isPinned ? "Unpin Tab" : "Pin Tab"),
-                                    systemImage: document.isPinned ? "pin.slash" : "pin"
+                            }
+                            .id(document.id)
+                            .onDrag {
+                                let provider = NSItemProvider()
+                                provider.registerDataRepresentation(
+                                    forTypeIdentifier: tabDragType.identifier,
+                                    visibility: .ownProcess
+                                ) { completion in
+                                    completion(document.id.uuidString.data(using: .utf8), nil)
+                                    return nil
+                                }
+                                return provider
+                            }
+                            .onDrop(
+                                of: [tabDragType],
+                                delegate: TabDropDelegate(
+                                    target: document,
+                                    width: windowState.tabWidths[document.id] ?? 0,
+                                    store: store
                                 )
+                            )
+                            .background(
+                                GeometryReader { proxy in
+                                    Color.clear
+                                        .onAppear {
+                                            recordTabWidth(document.id, proxy.size.width)
+                                        }
+                                        .onChange(of: proxy.size.width) { width in
+                                            recordTabWidth(document.id, width)
+                                        }
+                                }
+                            )
+                            .contextMenu {
+                                Button {
+                                    store.togglePin(document)
+                                } label: {
+                                    Label(
+                                        localization.t(document.isPinned ? "Unpin Tab" : "Pin Tab"),
+                                        systemImage: document.isPinned ? "pin.slash" : "pin"
+                                    )
+                                }
+                                Divider()
+                                Button("Save") { store.save(document) }
+                                Button("Save As…") { store.saveAs(document) }
+                                Button("Save a Copy As…") { store.saveCopyAs(document) }
+                                Divider()
+                                Button("Rename File…") {
+                                    if store.rename(document) { workspace.reload() }
+                                }
+                                .disabled(document.url == nil)
+                                Button("Open in Other Application…") {
+                                    store.openInOtherApplication(document)
+                                }
+                                Button("Reveal in Finder") {
+                                    store.revealInFinder(document)
+                                }
+                                .disabled(document.url == nil)
+                                Divider()
+                                Button("Close Tab") { store.close(document) }
+                                Button("Close All Tabs") { store.closeAll() }
                             }
-                            Divider()
-                            Button("Save") { store.save(document) }
-                            Button("Save As…") { store.saveAs(document) }
-                            Button("Save a Copy As…") { store.saveCopyAs(document) }
-                            Divider()
-                            Button("Rename File…") {
-                                if store.rename(document) { workspace.reload() }
-                            }
-                            .disabled(document.url == nil)
-                            Button("Open in Other Application…") {
-                                store.openInOtherApplication(document)
-                            }
-                            Button("Reveal in Finder") {
-                                store.revealInFinder(document)
-                            }
-                            .disabled(document.url == nil)
-                            Divider()
-                            Button("Close Tab") { store.close(document) }
-                            Button("Close All Tabs") { store.closeAll() }
                         }
+                        // Double-clicking the empty strip to the right of the tabs
+                        // creates a new document.
+                        Color.clear
+                            .frame(minWidth: 0, maxWidth: .infinity, minHeight: 37)
+                            .contentShape(Rectangle())
+                            .onTapGesture(count: 2) { store.newDocument() }
+                    }
+                    .padding(.horizontal, 8)
+                    .frame(minWidth: geometry.size.width, alignment: .leading)
+                }
+                .onDrop(
+                    of: [tabDragType],
+                    delegate: TabStripDropDelegate(store: store)
+                )
+                .onAppear {
+                    guard let id = store.activeDocumentID else { return }
+                    DispatchQueue.main.async {
+                        proxy.scrollTo(id, anchor: .center)
                     }
                 }
-                .padding(.horizontal, 8)
-            }
-            .onDrop(
-                of: [tabDragType],
-                delegate: TabStripDropDelegate(store: store)
-            )
-            .onAppear {
-                guard let id = store.activeDocumentID else { return }
-                DispatchQueue.main.async {
-                    proxy.scrollTo(id, anchor: .center)
-                }
-            }
-            .onChange(of: store.activeDocumentID) { id in
-                guard let id else { return }
-                withAnimation(.easeInOut(duration: 0.15)) {
-                    proxy.scrollTo(id, anchor: .center)
+                .onChange(of: store.activeDocumentID) { id in
+                    guard let id else { return }
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        proxy.scrollTo(id, anchor: .center)
+                    }
                 }
             }
         }
