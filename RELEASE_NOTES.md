@@ -6,6 +6,7 @@ Sixth prototype release for Apple Silicon macOS.
 
 ### New
 
+- Multilingual interface with **View → Language**: switch between English, Hindi, or the system language without relaunching, with the choice remembered; translations live in `Resources/Localization/*.lproj`, so adding a language is just a new folder of strings
 - Workspace sidebar: open one or more folders with ⌥⌘O and browse their files in a narrow tree beside the editor; folders expand lazily, long names scroll horizontally, and the open workspaces are restored on the next launch
 - Pinned tabs: pin a tab from the button next to its name or the tab's context menu to keep it at the left of the strip, and Close All Tabs leaves pinned tabs open
 - Drag tabs to reorder them; drop on the left or right half of a tab to insert before or after it, or drop in the empty space after the last tab to move it to the end
@@ -27,6 +28,7 @@ Sixth prototype release for Apple Silicon macOS.
 ### Included
 
 - Native macOS editor window with multiple document tabs
+- English and Hindi interface, switchable from the View menu, with system-language support and a file-based translation system for adding more languages
 - Workspace sidebar for one or more folders, with lazy folder expansion and session restore
 - Pinned tabs, drag-to-reorder tabs, and Close All Tabs
 - Save a Copy As and rename for open files

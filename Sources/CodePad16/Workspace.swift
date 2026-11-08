@@ -49,8 +49,8 @@ final class Workspace: ObservableObject {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = true
-        panel.prompt = "Add to Workspace"
-        panel.message = "Choose one or more folders to add to the workspace."
+        panel.prompt = L10n.t("Add to Workspace")
+        panel.message = L10n.t("Choose one or more folders to add to the workspace.")
         guard panel.runModal() == .OK else { return }
         for url in panel.urls { open(url) }
     }

@@ -8,6 +8,7 @@ struct FindInFilesView: View {
 
     @StateObject private var model: FindInFilesModel
     @StateObject private var collapse = FileCollapseState()
+    @EnvironmentObject private var localization: Localization
 
     init(
         initialFolder: URL? = nil,
@@ -29,6 +30,7 @@ struct FindInFilesView: View {
             footer
         }
         .frame(minWidth: 560, minHeight: 360)
+        .environment(\.locale, localization.locale)
         .onDisappear { model.cancel() }
         .onChange(of: model.results.map(\.id)) { _ in
             collapse.reset()
@@ -38,7 +40,7 @@ struct FindInFilesView: View {
     private var folderRow: some View {
         HStack(spacing: 8) {
             Button("Choose Folder…") { model.chooseFolder() }
-            Text(model.folder?.path ?? "No folder selected")
+            Text(model.folder?.path ?? localization.t("No folder selected"))
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -124,7 +126,9 @@ struct FindInFilesView: View {
             .background(Color(nsColor: .controlBackgroundColor))
         }
         .buttonStyle(.plain)
-        .help(collapse.contains(file.url) ? "Expand file results" : "Collapse file results")
+        .help(collapse.contains(file.url)
+            ? LocalizedStringKey("Expand file results")
+            : LocalizedStringKey("Collapse file results"))
     }
 
     private func resultRow(file: FileMatches, match: FileMatch) -> some View {
@@ -162,7 +166,9 @@ struct FindInFilesView: View {
                 .lineLimit(1)
             Spacer(minLength: 0)
             if !model.results.isEmpty {
-                Button(collapse.allCollapsed(model.results.map(\.id)) ? "Expand All" : "Collapse All") {
+                Button(collapse.allCollapsed(model.results.map(\.id))
+                    ? LocalizedStringKey("Expand All")
+                    : LocalizedStringKey("Collapse All")) {
                     collapse.setAll(model.results.map(\.id), collapsed: !collapse.allCollapsed(model.results.map(\.id)))
                 }
                 .buttonStyle(.borderless)
@@ -229,19 +235,57 @@ final class FileCollapseState: ObservableObject {
 
 @MainActor
 final class FindInFilesModel: ObservableObject {
+    enum Status {
+        case idle
+        case ready(String)
+        case enterTerm
+        case chooseFolder
+        case searching
+        case noMatches
+        case results(matchCount: Int, fileCount: Int)
+    }
+
     @Published var folder: URL?
     @Published var query = ""
     @Published var matchCase = false
     @Published var results: [FileMatches] = []
     @Published var isSearching = false
-    @Published var status = "Choose a folder and enter a search term."
+    @Published private var statusState: Status = .idle
+
+    var status: String {
+        switch statusState {
+        case .idle:
+            return L10n.t("Choose a folder and enter a search term.")
+        case .ready(let name):
+            return L10n.f("Ready to search %@.", name)
+        case .enterTerm:
+            return L10n.t("Enter a search term.")
+        case .chooseFolder:
+            return L10n.t("Choose a folder first.")
+        case .searching:
+            return L10n.t("Searching…")
+        case .noMatches:
+            return L10n.t("No matches")
+        case .results(let matchCount, let fileCount):
+            switch (matchCount == 1, fileCount == 1) {
+            case (true, true):
+                return L10n.f("%lld match in %lld file", matchCount, fileCount)
+            case (true, false):
+                return L10n.f("%lld match in %lld files", matchCount, fileCount)
+            case (false, true):
+                return L10n.f("%lld matches in %lld file", matchCount, fileCount)
+            case (false, false):
+                return L10n.f("%lld matches in %lld files", matchCount, fileCount)
+            }
+        }
+    }
 
     private var searchTask: Task<Void, Never>?
 
     init(initialFolder: URL? = nil) {
         folder = initialFolder
         if let initialFolder {
-            status = "Ready to search \(initialFolder.lastPathComponent)."
+            statusState = .ready(initialFolder.lastPathComponent)
         }
     }
 
@@ -250,10 +294,10 @@ final class FindInFilesModel: ObservableObject {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
-        panel.prompt = "Choose"
+        panel.prompt = L10n.t("Choose")
         guard panel.runModal() == .OK, let url = panel.url else { return }
         folder = url
-        status = "Ready to search \(url.lastPathComponent)."
+        statusState = .ready(url.lastPathComponent)
     }
 
     func cancel() {
@@ -263,18 +307,18 @@ final class FindInFilesModel: ObservableObject {
     func search() {
         let term = query
         guard !term.isEmpty else {
-            status = "Enter a search term."
+            statusState = .enterTerm
             return
         }
         guard let root = folder else {
-            status = "Choose a folder first."
+            statusState = .chooseFolder
             return
         }
 
         searchTask?.cancel()
         isSearching = true
         results = []
-        status = "Searching…"
+        statusState = .searching
 
         let caseSensitive = matchCase
         searchTask = Task {
@@ -285,9 +329,9 @@ final class FindInFilesModel: ObservableObject {
             let matchCount = found.reduce(0) { $0 + $1.matches.count }
             results = found
             isSearching = false
-            status = matchCount == 0
-                ? "No matches"
-                : "\(matchCount) match\(matchCount == 1 ? "" : "es") in \(found.count) file\(found.count == 1 ? "" : "s")"
+            statusState = matchCount == 0
+                ? .noMatches
+                : .results(matchCount: matchCount, fileCount: found.count)
         }
     }
 

@@ -27,6 +27,13 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$ROOT/.build/release/CodePad16" "$APP/Contents/MacOS/CodePad16"
 cp "$ROOT/Resources/CodePad16.icns" "$APP/Contents/Resources/CodePad16.icns"
 cp "$ROOT/LICENSE" "$APP/Contents/Resources/LICENSE"
+
+# Copy every language folder. Adding a language means adding a .lproj folder;
+# no script or source change is needed.
+for lproj in "$ROOT"/Resources/Localization/*.lproj; do
+  [[ -d "$lproj" ]] || continue
+  cp -R "$lproj" "$APP/Contents/Resources/"
+done
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -75,6 +82,17 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </dict>
 </plist>
 PLIST
+
+# Tell macOS which languages the bundle provides. The app's own language menu
+# reads the same folders, so both stay in sync automatically.
+/usr/libexec/PlistBuddy -c "Delete :CFBundleLocalizations" "$APP/Contents/Info.plist" 2>/dev/null || true
+/usr/libexec/PlistBuddy -c "Add :CFBundleLocalizations array" "$APP/Contents/Info.plist"
+for lproj in "$ROOT"/Resources/Localization/*.lproj; do
+  [[ -d "$lproj" ]] || continue
+  code="$(basename "$lproj" .lproj)"
+  /usr/libexec/PlistBuddy -c "Add :CFBundleLocalizations: string $code" "$APP/Contents/Info.plist"
+done
+
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 codesign --force --deep --sign - --timestamp=none "$APP"
 printf 'Built %s\n' "$APP"

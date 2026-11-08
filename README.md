@@ -22,6 +22,7 @@ Updates installed from **Check for Updates** inside CodePad16 do not trigger thi
 ## Current features
 
 - Native macOS window and controls, built with SwiftUI and AppKit
+- Multilingual interface with **View → Language**, including Hindi and English, with file-based translations that make new languages easy to add
 - Light, dark, and system appearance modes, selectable from the header or the View menu
 - Matching cat logo in the app icon and window header
 - Multiple open documents in tabs
@@ -46,6 +47,12 @@ Updates installed from **Check for Updates** inside CodePad16 do not trigger thi
 - Menu and keyboard shortcuts for common actions
 
 This is a prototype, not feature parity with Notepad++. Plugins are not implemented yet. Swift uses the C-family lexer as an initial approximation.
+
+## Languages
+
+CodePad16 ships with English and Hindi. Choose **View → Language** to switch instantly, or leave it on **System** to follow the macOS language order. The choice is remembered between launches.
+
+Translations live in `Resources/Localization/<code>.lproj/Localizable.strings`. To add a language, copy `en.lproj` to a new folder such as `fr.lproj`, translate the values while keeping the keys and placeholders intact, and rebuild. See [Resources/Localization/README.md](Resources/Localization/README.md) for the full steps.
 
 ## Build on Apple Silicon
 

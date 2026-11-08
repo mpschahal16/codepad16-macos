@@ -31,6 +31,10 @@ struct HistoryComboBox: NSViewRepresentable {
     func updateNSView(_ combo: NSComboBox, context: Context) {
         context.coordinator.parent = self
 
+        if combo.placeholderString != placeholder {
+            combo.placeholderString = placeholder
+        }
+
         let current = combo.objectValues.compactMap { $0 as? String }
         if current != items {
             let typed = combo.stringValue

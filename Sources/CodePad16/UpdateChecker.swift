@@ -194,11 +194,11 @@ final class UpdateChecker: ObservableObject {
         var errorDescription: String? {
             switch self {
             case .noReleases:
-                return "No published releases were found."
+                return L10n.t("No published releases were found.")
             case .noAsset:
-                return "The latest release has no disk image to download."
+                return L10n.t("The latest release has no disk image to download.")
             case .badResponse:
-                return "GitHub returned an unexpected response."
+                return L10n.t("GitHub returned an unexpected response.")
             }
         }
     }

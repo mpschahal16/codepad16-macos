@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ToolRunnerPanel: View {
     @EnvironmentObject private var tools: ToolRunner
+    @EnvironmentObject private var localization: Localization
     /// Not observed: the controller is only read when a prompt is submitted.
     let controller: EditorController
     let document: EditorDocument?
@@ -42,7 +43,7 @@ struct ToolRunnerPanel: View {
         HStack(spacing: 8) {
             Picker("Tool", selection: $tools.selectedToolID) {
                 ForEach(ToolPreset.all) { preset in
-                    Text(preset.name).tag(preset.id)
+                    Text(localization.t(preset.name)).tag(preset.id)
                 }
             }
             .labelsHidden()
@@ -93,7 +94,7 @@ struct ToolRunnerPanel: View {
         monospaced: Bool
     ) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(title.uppercased())
+            Text(localization.t(title).uppercased())
                 .font(.system(size: 9, weight: .semibold))
                 .tracking(0.6)
                 .foregroundStyle(.secondary)
@@ -104,7 +105,7 @@ struct ToolRunnerPanel: View {
 
             ScrollViewReader { proxy in
                 ScrollView {
-                    Text(text.isEmpty ? placeholder : text)
+                    Text(text.isEmpty ? localization.t(placeholder) : text)
                         .font(monospaced
                             ? .system(size: 11, design: .monospaced)
                             : .system(size: 12))

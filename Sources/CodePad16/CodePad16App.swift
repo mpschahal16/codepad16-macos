@@ -47,6 +47,7 @@ struct CodePad16App: App {
     @StateObject private var tools = ToolRunner()
     @StateObject private var help = HelpState()
     @StateObject private var updates = UpdateChecker()
+    @StateObject private var localization = Localization.shared
     @NSApplicationDelegateAdaptor(CodePad16AppDelegate.self) private var appDelegate
 
     var body: some Scene {
@@ -59,79 +60,92 @@ struct CodePad16App: App {
                 .environmentObject(tools)
                 .environmentObject(help)
                 .environmentObject(updates)
+                .environmentObject(localization)
+                .environment(\.locale, localization.locale)
                 .frame(minWidth: 760, minHeight: 500)
         }
         .commands {
             CommandGroup(after: .toolbar) {
-                Picker("Appearance", selection: $appearance.mode) {
+                Picker(localization.t("Appearance"), selection: $appearance.mode) {
                     ForEach(AppearanceMode.allCases) { mode in
                         Label(mode.title, systemImage: mode.symbolName).tag(mode)
                     }
                 }
+                Picker(localization.t("Language"), selection: Binding(
+                    get: { localization.selection },
+                    set: { localization.select($0) }
+                )) {
+                    Text(localization.t("System")).tag(Localization.systemID)
+                    ForEach(localization.available) { language in
+                        Text(language.name).tag(language.id)
+                    }
+                }
                 Divider()
-                Button(tools.isPanelVisible ? "Hide Tool Runner" : "Show Tool Runner") {
+                Button(tools.isPanelVisible
+                    ? localization.t("Hide Tool Runner")
+                    : localization.t("Show Tool Runner")) {
                     tools.isPanelVisible.toggle()
                 }
             }
             CommandGroup(replacing: .newItem) {
-                Button("New Tab") { store.newDocument() }
+                Button(localization.t("New Tab")) { store.newDocument() }
                     .keyboardShortcut("n", modifiers: .command)
-                Button("Open…") { store.openFiles() }
+                Button(localization.t("Open…")) { store.openFiles() }
                     .keyboardShortcut("o", modifiers: .command)
             }
             CommandGroup(after: .newItem) {
                 Divider()
-                Button("Open Folder as Workspace…") { workspace.chooseFolder() }
+                Button(localization.t("Open Folder as Workspace…")) { workspace.chooseFolder() }
                     .keyboardShortcut("o", modifiers: [.command, .option])
-                Button("Close All Workspaces") { workspace.close() }
+                Button(localization.t("Close All Workspaces")) { workspace.close() }
                     .disabled(workspace.roots.isEmpty)
             }
             CommandGroup(replacing: .saveItem) {
-                Button("Save") {
+                Button(localization.t("Save")) {
                     if let document = store.activeDocument { store.save(document) }
                 }
                 .keyboardShortcut("s", modifiers: .command)
                 .disabled(store.activeDocument == nil)
-                Button("Save As…") {
+                Button(localization.t("Save As…")) {
                     if let document = store.activeDocument { store.saveAs(document) }
                 }
                 .keyboardShortcut("s", modifiers: [.command, .shift])
                 .disabled(store.activeDocument == nil)
-                Button("Save a Copy As…") {
+                Button(localization.t("Save a Copy As…")) {
                     if let document = store.activeDocument { store.saveCopyAs(document) }
                 }
                 .keyboardShortcut("s", modifiers: [.command, .option])
                 .disabled(store.activeDocument == nil)
-                Button("Rename File…") {
+                Button(localization.t("Rename File…")) {
                     if let document = store.activeDocument, store.rename(document) {
                         workspace.reload()
                     }
                 }
                 .disabled(store.activeDocument?.url == nil)
                 Divider()
-                Button("Open in Other Application…") {
+                Button(localization.t("Open in Other Application…")) {
                     if let document = store.activeDocument {
                         store.openInOtherApplication(document)
                     }
                 }
                 .disabled(store.activeDocument == nil)
-                Button("Reveal in Finder") {
+                Button(localization.t("Reveal in Finder")) {
                     if let document = store.activeDocument {
                         store.revealInFinder(document)
                     }
                 }
                 .disabled(store.activeDocument?.url == nil)
                 Divider()
-                Button("Close All Tabs") { store.closeAll() }
+                Button(localization.t("Close All Tabs")) { store.closeAll() }
                     .keyboardShortcut("w", modifiers: [.command, .option])
                     .disabled(store.documents.isEmpty)
             }
             CommandGroup(replacing: .help) {
-                Button("About CodePad16") { help.showAbout = true }
-                Button("Check for Updates…") { updates.checkForUpdates() }
+                Button(localization.t("About CodePad16")) { help.showAbout = true }
+                Button(localization.t("Check for Updates…")) { updates.checkForUpdates() }
                 Divider()
-                Button("Release Notes") { help.showReleaseNotes = true }
-                Button("License…") { help.showLicense = true }
+                Button(localization.t("Release Notes")) { help.showReleaseNotes = true }
+                Button(localization.t("License…")) { help.showLicense = true }
             }
         }
     }
@@ -292,8 +306,8 @@ final class EditorDocument: ObservableObject, Identifiable {
         self.lineCount = Self.countLines(in: text)
     }
 
-    var title: String { url?.lastPathComponent ?? "Untitled" }
-    var displayPath: String { url.map { ($0.path as NSString).abbreviatingWithTildeInPath } ?? "Unsaved" }
+    var title: String { url?.lastPathComponent ?? L10n.t("Untitled") }
+    var displayPath: String { url.map { ($0.path as NSString).abbreviatingWithTildeInPath } ?? L10n.t("Unsaved") }
 
     /// Points the document at a new path, such as after its file is renamed,
     /// without touching its saved/unsaved state.
@@ -492,8 +506,8 @@ final class EditorStore: ObservableObject {
             let data = try Data(contentsOf: url)
             guard let (encoding, contents) = TextEncoding.decode(data) else {
                 showError(
-                    "Could not open \(url.lastPathComponent)",
-                    detail: "The file is not valid UTF-8, UTF-16, UTF-32, or ISO-8859-1 text."
+                    L10n.f("Could not open %@", url.lastPathComponent),
+                    detail: L10n.t("The file is not valid UTF-8, UTF-16, UTF-32, or ISO-8859-1 text.")
                 )
                 return nil
             }
@@ -516,7 +530,7 @@ final class EditorStore: ObservableObject {
             saveSession()
             return document
         } catch {
-            showError("Could not open \(url.lastPathComponent)", detail: error.localizedDescription)
+            showError(L10n.f("Could not open %@", url.lastPathComponent), detail: error.localizedDescription)
             return nil
         }
     }
@@ -527,6 +541,7 @@ final class EditorStore: ObservableObject {
         panel.allowedContentTypes = [.item]
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
+        panel.prompt = L10n.t("Open")
         guard panel.runModal() == .OK else { return }
 
         for url in panel.urls {
@@ -538,8 +553,8 @@ final class EditorStore: ObservableObject {
                 let data = try Data(contentsOf: url)
                 guard let (encoding, contents) = TextEncoding.decode(data) else {
                     showError(
-                        "Could not open \(url.lastPathComponent)",
-                        detail: "The file is not valid UTF-8, UTF-16, UTF-32, or ISO-8859-1 text."
+                        L10n.f("Could not open %@", url.lastPathComponent),
+                        detail: L10n.t("The file is not valid UTF-8, UTF-16, UTF-32, or ISO-8859-1 text.")
                     )
                     continue
                 }
@@ -547,7 +562,7 @@ final class EditorStore: ObservableObject {
                 documents.append(document)
                 activeDocumentID = document.id
             } catch {
-                showError("Could not open \(url.lastPathComponent)", detail: error.localizedDescription)
+                showError(L10n.f("Could not open %@", url.lastPathComponent), detail: error.localizedDescription)
             }
         }
         saveSession()
@@ -563,7 +578,11 @@ final class EditorStore: ObservableObject {
     func saveAs(_ document: EditorDocument) -> Bool {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.item]
-        panel.nameFieldStringValue = document.title == "Untitled" ? "Untitled.txt" : document.title
+        panel.title = L10n.t("Save As…")
+        panel.prompt = L10n.t("Save")
+        panel.nameFieldStringValue = document.url == nil
+            ? L10n.t("Untitled") + ".txt"
+            : document.title
         guard panel.runModal() == .OK, let url = panel.url else { return false }
         return write(document, to: url)
     }
@@ -574,16 +593,21 @@ final class EditorStore: ObservableObject {
     func saveCopyAs(_ document: EditorDocument) -> Bool {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.item]
-        panel.title = "Save a Copy"
-        panel.message = "The open tab keeps its current file."
-        panel.prompt = "Save"
-        panel.nameFieldStringValue = document.title == "Untitled" ? "Untitled.txt" : document.title
+        panel.title = L10n.t("Save a Copy")
+        panel.message = L10n.t("The open tab keeps its current file.")
+        panel.prompt = L10n.t("Save")
+        panel.nameFieldStringValue = document.url == nil
+            ? L10n.t("Untitled") + ".txt"
+            : document.title
         guard panel.runModal() == .OK, let url = panel.url else { return false }
 
         guard let data = document.encoding.encode(document.text) else {
             showError(
-                "Could not save \(url.lastPathComponent)",
-                detail: "Some characters cannot be represented in \(document.encoding.name). Choose UTF-8 in the status bar and try again."
+                L10n.f("Could not save %@", url.lastPathComponent),
+                detail: L10n.f(
+                    "Some characters cannot be represented in %@. Choose UTF-8 in the status bar and try again.",
+                    document.encoding.name
+                )
             )
             return false
         }
@@ -591,7 +615,7 @@ final class EditorStore: ObservableObject {
             try data.write(to: url, options: .atomic)
             return true
         } catch {
-            showError("Could not save \(url.lastPathComponent)", detail: error.localizedDescription)
+            showError(L10n.f("Could not save %@", url.lastPathComponent), detail: error.localizedDescription)
             return false
         }
     }
@@ -601,10 +625,10 @@ final class EditorStore: ObservableObject {
     @discardableResult
     func renameFile(at url: URL) -> Bool {
         let alert = NSAlert()
-        alert.messageText = "Rename “\(url.lastPathComponent)”"
-        alert.informativeText = "Enter a new name for this file."
-        alert.addButton(withTitle: "Rename")
-        alert.addButton(withTitle: "Cancel")
+        alert.messageText = L10n.f("Rename “%@”", url.lastPathComponent)
+        alert.informativeText = L10n.t("Enter a new name for this file.")
+        alert.addButton(withTitle: L10n.t("Rename"))
+        alert.addButton(withTitle: L10n.t("Cancel"))
 
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
         field.stringValue = url.lastPathComponent
@@ -616,8 +640,8 @@ final class EditorStore: ObservableObject {
         let newName = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !newName.isEmpty, !newName.contains("/"), !newName.contains(":") else {
             showError(
-                "Could not rename \(url.lastPathComponent)",
-                detail: "Enter a file name without slashes or colons."
+                L10n.f("Could not rename %@", url.lastPathComponent),
+                detail: L10n.t("Enter a file name without slashes or colons.")
             )
             return false
         }
@@ -631,17 +655,17 @@ final class EditorStore: ObservableObject {
         if !caseOnlyRename, FileManager.default.fileExists(atPath: target.path) {
             let confirm = NSAlert()
             confirm.alertStyle = .warning
-            confirm.messageText = "“\(newName)” already exists."
-            confirm.informativeText = "Replacing it cannot be undone."
-            confirm.addButton(withTitle: "Replace")
-            confirm.addButton(withTitle: "Cancel")
+            confirm.messageText = L10n.f("“%@” already exists.", newName)
+            confirm.informativeText = L10n.t("Replacing it cannot be undone.")
+            confirm.addButton(withTitle: L10n.t("Replace"))
+            confirm.addButton(withTitle: L10n.t("Cancel"))
             guard confirm.runModal() == .alertFirstButtonReturn else { return false }
         }
 
         do {
             try Self.moveFile(at: url, to: target)
         } catch {
-            showError("Could not rename \(url.lastPathComponent)", detail: error.localizedDescription)
+            showError(L10n.f("Could not rename %@", url.lastPathComponent), detail: error.localizedDescription)
             return false
         }
 
@@ -687,21 +711,21 @@ final class EditorStore: ObservableObject {
             return saveCopyAs(document)
         }
         guard let data = try? Data(contentsOf: url) else {
-            showError("Could not copy \(url.lastPathComponent)", detail: "The file could not be read.")
+            showError(L10n.f("Could not copy %@", url.lastPathComponent), detail: L10n.t("The file could not be read."))
             return false
         }
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.item]
-        panel.title = "Save a Copy"
-        panel.message = "The original file is left unchanged."
-        panel.prompt = "Save"
+        panel.title = L10n.t("Save a Copy")
+        panel.message = L10n.t("The original file is left unchanged.")
+        panel.prompt = L10n.t("Save")
         panel.nameFieldStringValue = url.lastPathComponent
         guard panel.runModal() == .OK, let target = panel.url else { return false }
         do {
             try data.write(to: target, options: .atomic)
             return true
         } catch {
-            showError("Could not save \(target.lastPathComponent)", detail: error.localizedDescription)
+            showError(L10n.f("Could not save %@", target.lastPathComponent), detail: error.localizedDescription)
             return false
         }
     }
@@ -727,10 +751,10 @@ final class EditorStore: ObservableObject {
             if document.isDirty {
                 let alert = NSAlert()
                 alert.alertStyle = .warning
-                alert.messageText = "Save changes before opening \(document.title) in another application?"
-                alert.informativeText = "The other application will open the saved version of the file."
-                alert.addButton(withTitle: "Save and Open")
-                alert.addButton(withTitle: "Cancel")
+                alert.messageText = L10n.f("Save changes before opening %@ in another application?", document.title)
+                alert.informativeText = L10n.t("The other application will open the saved version of the file.")
+                alert.addButton(withTitle: L10n.t("Save and Open"))
+                alert.addButton(withTitle: L10n.t("Cancel"))
                 guard alert.runModal() == .alertFirstButtonReturn else { return }
             }
             guard save(document) else { return }
@@ -743,8 +767,8 @@ final class EditorStore: ObservableObject {
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
         panel.directoryURL = FileManager.default.urls(for: .applicationDirectory, in: .localDomainMask).first
-        panel.message = "Choose an application to open \(url.lastPathComponent) with."
-        panel.prompt = "Open"
+        panel.message = L10n.f("Choose an application to open %@ with.", url.lastPathComponent)
+        panel.prompt = L10n.t("Open")
         guard panel.runModal() == .OK, let applicationURL = panel.url else { return }
 
         let configuration = NSWorkspace.OpenConfiguration()
@@ -757,7 +781,7 @@ final class EditorStore: ObservableObject {
             guard let error else { return }
             Task { @MainActor in
                 self?.showError(
-                    "Could not open \(url.lastPathComponent)",
+                    L10n.f("Could not open %@", url.lastPathComponent),
                     detail: error.localizedDescription
                 )
             }
@@ -774,11 +798,11 @@ final class EditorStore: ObservableObject {
         if document.isDirty {
             let alert = NSAlert()
             alert.alertStyle = .warning
-            alert.messageText = "Save changes to \(document.title)?"
-            alert.informativeText = "Your edits will be lost if you close this tab without saving."
-            alert.addButton(withTitle: "Save")
-            alert.addButton(withTitle: "Cancel")
-            alert.addButton(withTitle: "Discard Changes")
+            alert.messageText = L10n.f("Save changes to %@?", document.title)
+            alert.informativeText = L10n.t("Your edits will be lost if you close this tab without saving.")
+            alert.addButton(withTitle: L10n.t("Save"))
+            alert.addButton(withTitle: L10n.t("Cancel"))
+            alert.addButton(withTitle: L10n.t("Discard Changes"))
             switch alert.runModal() {
             case .alertFirstButtonReturn:
                 guard save(document) else { return }
@@ -804,12 +828,12 @@ final class EditorStore: ObservableObject {
             let alert = NSAlert()
             alert.alertStyle = .warning
             alert.messageText = dirty.count == 1
-                ? "Save changes to \(dirty[0].title)?"
-                : "Save changes to \(dirty.count) tabs?"
-            alert.informativeText = "Your edits will be lost if you close these tabs without saving."
-            alert.addButton(withTitle: "Save All")
-            alert.addButton(withTitle: "Cancel")
-            alert.addButton(withTitle: "Discard Changes")
+                ? L10n.f("Save changes to %@?", dirty[0].title)
+                : L10n.f("Save changes to %lld tabs?", dirty.count)
+            alert.informativeText = L10n.t("Your edits will be lost if you close these tabs without saving.")
+            alert.addButton(withTitle: L10n.t("Save All"))
+            alert.addButton(withTitle: L10n.t("Cancel"))
+            alert.addButton(withTitle: L10n.t("Discard Changes"))
             switch alert.runModal() {
             case .alertFirstButtonReturn:
                 for document in dirty {
@@ -835,8 +859,11 @@ final class EditorStore: ObservableObject {
     private func write(_ document: EditorDocument, to url: URL) -> Bool {
         guard let data = document.encoding.encode(document.text) else {
             showError(
-                "Could not save \(url.lastPathComponent)",
-                detail: "Some characters cannot be represented in \(document.encoding.name). Choose UTF-8 in the status bar and save again."
+                L10n.f("Could not save %@", url.lastPathComponent),
+                detail: L10n.f(
+                    "Some characters cannot be represented in %@. Choose UTF-8 in the status bar and save again.",
+                    document.encoding.name
+                )
             )
             return false
         }
@@ -846,7 +873,7 @@ final class EditorStore: ObservableObject {
             saveSession()
             return true
         } catch {
-            showError("Could not save \(url.lastPathComponent)", detail: error.localizedDescription)
+            showError(L10n.f("Could not save %@", url.lastPathComponent), detail: error.localizedDescription)
             return false
         }
     }
@@ -869,6 +896,7 @@ struct CodePad16Window: View {
     @EnvironmentObject private var tools: ToolRunner
     @EnvironmentObject private var help: HelpState
     @EnvironmentObject private var updates: UpdateChecker
+    @EnvironmentObject private var localization: Localization
     @Environment(\.openWindow) private var openWindow
     @StateObject private var windowState = WindowState()
     @StateObject private var editorController = EditorController()
@@ -1065,7 +1093,9 @@ struct CodePad16Window: View {
             .fixedSize()
             .help("Editor options")
             Button { tools.isPanelVisible.toggle() } label: { Label("Tools", systemImage: "sparkles") }
-                .help(tools.isPanelVisible ? "Hide tool runner" : "Show tool runner")
+                .help(tools.isPanelVisible
+                    ? LocalizedStringKey("Hide tool runner")
+                    : LocalizedStringKey("Show tool runner"))
             Menu {
                 Button("About CodePad16") { help.showAbout = true }
                 Button("Check for Updates…") { updates.checkForUpdates() }
@@ -1123,10 +1153,10 @@ struct CodePad16Window: View {
     private var findStatusText: String {
         guard !windowState.findQuery.isEmpty else { return "" }
         let info = editorController.matchInfo(windowState.findQuery)
-        guard info.total > 0 else { return "No matches" }
+        guard info.total > 0 else { return L10n.t("No matches") }
         // A selection past the last match wraps to the first one.
         let index = info.index > 0 ? info.index : 1
-        return "\(index) of \(info.total)"
+        return L10n.f("%lld of %lld", index, info.total)
     }
 
     private func openReplaceBar() {
@@ -1153,12 +1183,12 @@ struct CodePad16Window: View {
 
     private func promptGoToLine() {
         let alert = NSAlert()
-        alert.messageText = "Go to Line"
-        alert.informativeText = "Enter a line number between 1 and \(editorController.lineCount)."
-        alert.addButton(withTitle: "Go")
-        alert.addButton(withTitle: "Cancel")
+        alert.messageText = L10n.t("Go to Line")
+        alert.informativeText = L10n.f("Enter a line number between 1 and %lld.", editorController.lineCount)
+        alert.addButton(withTitle: L10n.t("Go"))
+        alert.addButton(withTitle: L10n.t("Cancel"))
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 220, height: 24))
-        field.placeholderString = "Line number"
+        field.placeholderString = L10n.t("Line number")
         alert.accessoryView = field
         alert.window.initialFirstResponder = field
         guard alert.runModal() == .alertFirstButtonReturn else { return }
@@ -1179,14 +1209,16 @@ struct CodePad16Window: View {
             backing: .buffered,
             defer: false
         )
-        panel.title = "Find in Files"
+        panel.title = localization.t("Find in Files")
         panel.isReleasedWhenClosed = false
         panel.hidesOnDeactivate = false
         panel.contentView = NSHostingView(rootView: FindInFilesView(
             initialFolder: workspace.roots.first,
             onClose: { [weak panel] in panel?.close() },
             onOpen: { url, line in openSearchResult(url, line: line) }
-        ))
+        )
+        .environmentObject(localization)
+        .environment(\.locale, localization.locale))
         panel.center()
         windowState.findInFilesPanel = panel
         panel.makeKeyAndOrderFront(nil)
@@ -1222,7 +1254,7 @@ struct CodePad16Window: View {
             windowState.findQuery,
             with: windowState.replaceQuery
         )
-        windowState.replaceStatus = replaced ? "Replaced 1 match" : ""
+        windowState.replaceStatus = replaced ? L10n.t("Replaced 1 match") : ""
     }
 
     private func replaceAllMatches() {
@@ -1235,11 +1267,11 @@ struct CodePad16Window: View {
         )
         switch count {
         case 0:
-            windowState.replaceStatus = "No matches"
+            windowState.replaceStatus = L10n.t("No matches")
         case 1:
-            windowState.replaceStatus = "Replaced 1 match"
+            windowState.replaceStatus = L10n.t("Replaced 1 match")
         default:
-            windowState.replaceStatus = "Replaced \(count) matches"
+            windowState.replaceStatus = L10n.f("Replaced %lld matches", count)
         }
     }
 
@@ -1249,7 +1281,7 @@ struct CodePad16Window: View {
                 HistoryComboBox(
                     text: $windowState.findQuery,
                     items: windowState.findHistory,
-                    placeholder: "Find in document",
+                    placeholder: localization.t("Find in document"),
                     onSubmit: { findInDocument(backwards: false) }
                 )
                 .frame(minWidth: 140, maxWidth: .infinity)
@@ -1267,7 +1299,9 @@ struct CodePad16Window: View {
                 } label: {
                     Image(systemName: "arrow.left.arrow.right")
                 }
-                .help(windowState.showReplace ? "Hide replace" : "Show replace")
+                .help(windowState.showReplace
+                    ? LocalizedStringKey("Hide replace")
+                    : LocalizedStringKey("Show replace"))
                 Toggle("Match case", isOn: $editorController.matchCase)
                     .toggleStyle(.checkbox)
                     .font(.system(size: 11))
@@ -1287,7 +1321,7 @@ struct CodePad16Window: View {
                     HistoryComboBox(
                         text: $windowState.replaceQuery,
                         items: windowState.replaceHistory,
-                        placeholder: "Replace with",
+                        placeholder: localization.t("Replace with"),
                         onSubmit: { replaceCurrentMatch() }
                     )
                     .frame(minWidth: 140, maxWidth: .infinity)
@@ -1364,7 +1398,7 @@ struct CodePad16Window: View {
                                 store.togglePin(document)
                             } label: {
                                 Label(
-                                    document.isPinned ? "Unpin Tab" : "Pin Tab",
+                                    localization.t(document.isPinned ? "Unpin Tab" : "Pin Tab"),
                                     systemImage: document.isPinned ? "pin.slash" : "pin"
                                 )
                             }
@@ -1468,6 +1502,7 @@ private struct WindowTitleModifier: ViewModifier {
 
 private struct LiveTitleModifier: ViewModifier {
     @ObservedObject var document: EditorDocument
+    @EnvironmentObject private var localization: Localization
 
     func body(content: Content) -> some View {
         content.navigationTitle("\(document.title) - CodePad16")
@@ -1478,6 +1513,7 @@ private struct LiveTitleModifier: ViewModifier {
 struct StatusBar: View {
     @ObservedObject var document: EditorDocument
     let controller: EditorController
+    @EnvironmentObject private var localization: Localization
 
     var body: some View {
         HStack(spacing: 14) {
@@ -1487,14 +1523,14 @@ struct StatusBar: View {
                         document.languageMode = mode
                     } label: {
                         if document.languageMode.id == mode.id {
-                            Label(mode.name, systemImage: "checkmark")
+                            Label(localization.t(mode.name), systemImage: "checkmark")
                         } else {
-                            Text(mode.name)
+                            Text(localization.t(mode.name))
                         }
                     }
                 }
             } label: {
-                Label(document.languageMode.name, systemImage: "chevron.up.chevron.down")
+                Label(localization.t(document.languageMode.name), systemImage: "chevron.up.chevron.down")
             }
             .menuStyle(.borderlessButton)
             Menu {
@@ -1521,7 +1557,7 @@ struct StatusBar: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .layoutPriority(1)
-                .help(document.url?.path ?? "This document has not been saved yet")
+                .help(document.url?.path ?? localization.t("This document has not been saved yet"))
             CursorReadout(controller: controller)
         }
         .font(.system(size: 11))
@@ -1550,6 +1586,7 @@ struct DocumentTab: View {
     let onSelect: () -> Void
     let onClose: () -> Void
     let onTogglePin: () -> Void
+    @EnvironmentObject private var localization: Localization
 
     var body: some View {
         HStack(spacing: 7) {
@@ -1576,7 +1613,7 @@ struct DocumentTab: View {
         .overlay(alignment: .bottom) {
             if isSelected { Rectangle().fill(Color.accentColor).frame(height: 2) }
         }
-        .help(document.url?.path ?? "This document has not been saved yet")
+        .help(document.url?.path ?? localization.t("This document has not been saved yet"))
     }
 
     /// Pin button beside the file name, for pinning and unpinning the tab.
@@ -1589,7 +1626,7 @@ struct DocumentTab: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(document.isPinned ? "Unpin tab" : "Pin tab")
+        .help(localization.t(document.isPinned ? "Unpin tab" : "Pin tab"))
     }
 }
 

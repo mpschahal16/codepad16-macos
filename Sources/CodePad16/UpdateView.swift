@@ -5,6 +5,7 @@ import SwiftUI
 struct UpdateView: View {
     let onClose: () -> Void
     @ObservedObject var checker: UpdateChecker
+    @EnvironmentObject private var localization: Localization
 
     var body: some View {
         VStack(spacing: 0) {
@@ -60,34 +61,34 @@ struct UpdateView: View {
     private var title: String {
         switch checker.phase {
         case .idle, .checking:
-            return "Checking for Updates…"
+            return localization.t("Checking for Updates…")
         case .upToDate:
-            return "You're up to date"
+            return localization.t("You're up to date")
         case .downloading(let version):
-            return "Downloading CodePad16 \(version)…"
+            return localization.f("Downloading CodePad16 %@…", version)
         case .downloaded(let version, _):
-            return "CodePad16 \(version) downloaded"
+            return localization.f("CodePad16 %@ downloaded", version)
         case .installing(let version):
-            return "Installing CodePad16 \(version)…"
+            return localization.f("Installing CodePad16 %@…", version)
         case .failed:
-            return "Couldn't check for updates"
+            return localization.t("Couldn't check for updates")
         }
     }
 
     private var message: String {
         switch checker.phase {
         case .idle, .checking:
-            return "Looking for the latest release on GitHub."
+            return localization.t("Looking for the latest release on GitHub.")
         case .upToDate(let current, let latest):
             return latest == current
-                ? "CodePad16 \(current) is the latest version."
-                : "CodePad16 \(latest) is the latest version; you have \(current)."
+                ? localization.f("CodePad16 %@ is the latest version.", current)
+                : localization.f("CodePad16 %@ is the latest version; you have %@.", latest, current)
         case .downloading:
-            return "The disk image will be saved to your Downloads folder."
+            return localization.t("The disk image will be saved to your Downloads folder.")
         case .downloaded(_, let file):
-            return "Saved to \(file.path)"
+            return localization.f("Saved to %@", file.path)
         case .installing:
-            return "CodePad16 will quit and reopen when the update is installed."
+            return localization.t("CodePad16 will quit and reopen when the update is installed.")
         case .failed(let reason):
             return reason
         }

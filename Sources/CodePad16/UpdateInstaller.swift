@@ -175,13 +175,13 @@ enum UpdateInstaller {
         var errorDescription: String? {
             switch self {
             case .notAnApp:
-                return "The app is not running from an application bundle."
+                return L10n.t("The app is not running from an application bundle.")
             case .appNotFound:
-                return "The downloaded disk image does not contain CodePad16."
+                return L10n.t("The downloaded disk image does not contain CodePad16.")
             case .destinationNotWritable(let url):
-                return "CodePad16 cannot replace \(url.path). Move the app to a writable location and try again."
+                return L10n.f("CodePad16 cannot replace %@. Move the app to a writable location and try again.", url.path)
             case .commandFailed(let tool):
-                return "The update could not be installed (\(tool) failed)."
+                return L10n.f("The update could not be installed (%@ failed).", tool)
             }
         }
     }

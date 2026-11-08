@@ -108,7 +108,7 @@ final class ToolRunner: ObservableObject {
         output.activity = ""
         isRunning = true
         wasCancelled = false
-        appendActivity("Running \(selectedPreset.name)…\n")
+        appendActivity(L10n.f("Running %@…\n", L10n.t(selectedPreset.name)))
         flushPendingOutput()
 
         let process = Process()
@@ -166,16 +166,16 @@ final class ToolRunner: ObservableObject {
                 // The stream handlers stay installed until each pipe reports
                 // end of file, so trailing output is not dropped.
                 if self.wasCancelled {
-                    self.appendActivity("\n[stopped]\n")
+                    self.appendActivity(L10n.t("\n[stopped]\n"))
                 } else if process.terminationStatus != 0 {
-                    self.appendActivity("\n[exited with status \(process.terminationStatus)]\n")
+                    self.appendActivity(L10n.f("\n[exited with status %d]\n", process.terminationStatus))
                     if process.terminationStatus == 127 {
                         self.appendActivity(
-                            "[command not found] Install the tool, or make sure it is on the PATH set by your ~/.zshrc.\n"
+                            L10n.t("[command not found] Install the tool, or make sure it is on the PATH set by your ~/.zshrc.\n")
                         )
                     }
                 } else {
-                    self.appendActivity("\n[finished]\n")
+                    self.appendActivity(L10n.t("\n[finished]\n"))
                 }
                 // Publish whatever is still buffered before the run is done.
                 self.flushPendingOutput(final: true)
@@ -192,7 +192,7 @@ final class ToolRunner: ObservableObject {
             isRunning = false
             self.process = nil
             stopStreams()
-            appendActivity("Could not run the command: \(error.localizedDescription)\n")
+            appendActivity(L10n.f("Could not run the command: %@\n", error.localizedDescription))
         }
     }
 
