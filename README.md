@@ -40,8 +40,8 @@ Updates installed from **Check for Updates** inside CodePad16 do not trigger thi
 - Find in Files with a floating results panel that stays open while you open matches, opened with the first workspace folder selected
 - Syntax highlighting and automatic language detection for C, C++, C#, Java, JavaScript, TypeScript, Python, Swift, HTML, CSS, JSON, XML, and SQL
 - A language-mode picker for changing the detected mode
-- Scintilla line-number gutter
-- Restores the previous session on launch, including open tabs, cursor and scroll position, language, encoding, pin state, and unsaved changes
+- Scintilla line-number gutter; double-click a line in the gutter to add or remove a pointer arrow
+- Restores the previous session on launch, including open tabs, cursor and scroll position, gutter pointers, language, encoding, pin state, and unsaved changes
 - Unsaved-change indicator and close confirmation
 - Encoding label and line count
 - Menu and keyboard shortcuts for common actions

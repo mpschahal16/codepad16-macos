@@ -9,6 +9,12 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic) BOOL wordWrap;
 @property(nonatomic) BOOL matchCase;
 @property(nonatomic, copy, nullable) void (^onChange)(NSString * _Nullable text, NSInteger line, NSInteger column, BOOL modified, NSInteger lineCount);
+/// Called after a double-click in the gutter adds or removes a pointer marker.
+@property(nonatomic, copy, nullable) void (^onPointerChange)(NSArray<NSNumber *> *lines);
+/// 1-based line numbers that currently show a pointer marker, sorted ascending.
+@property(nonatomic, copy) NSArray<NSNumber *> *pointerLines;
+/// Toggles the pointer marker on a 1-based line.
+- (void)togglePointerAtLine:(NSInteger)line;
 - (void)selectRange:(NSRange)range;
 - (NSRange)selection;
 - (NSRange)matchInfo:(NSString *)query;

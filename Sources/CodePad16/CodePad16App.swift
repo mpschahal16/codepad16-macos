@@ -285,6 +285,8 @@ final class EditorDocument: ObservableObject, Identifiable {
     /// Last caret offset and scroll position, updated while the document is shown.
     var caretPosition = 0
     var firstVisibleLine = 0
+    /// 1-based lines with a pointer marker in the gutter.
+    var pointerLines: [Int] = []
     /// Line count as reported by the editor, so the status bar does not have to
     /// rescan the whole document whenever the view updates.
     @Published var lineCount: Int
@@ -370,6 +372,7 @@ final class EditorStore: ObservableObject {
                     document.isDirty = true
                     document.caretPosition = entry.caretPosition
                     document.firstVisibleLine = entry.firstVisibleLine
+                    document.pointerLines = entry.pointerLines ?? []
                     restored.append(document)
                 } else if let data = try? Data(contentsOf: url),
                           let (detectedEncoding, text) = TextEncoding.decode(data) {
@@ -379,6 +382,7 @@ final class EditorStore: ObservableObject {
                     )
                     document.caretPosition = entry.caretPosition
                     document.firstVisibleLine = entry.firstVisibleLine
+                    document.pointerLines = entry.pointerLines ?? []
                     restored.append(document)
                 }
             } else {
@@ -390,6 +394,7 @@ final class EditorStore: ObservableObject {
                 document.isDirty = !text.isEmpty
                 document.caretPosition = entry.caretPosition
                 document.firstVisibleLine = entry.firstVisibleLine
+                document.pointerLines = entry.pointerLines ?? []
                 restored.append(document)
             }
         }
@@ -408,7 +413,8 @@ final class EditorStore: ObservableObject {
                 encodingID: document.encoding.id,
                 languageID: document.languageMode.id,
                 caretPosition: document.caretPosition,
-                firstVisibleLine: document.firstVisibleLine
+                firstVisibleLine: document.firstVisibleLine,
+                pointerLines: document.pointerLines
             )
         }
         let index = documents.firstIndex { $0.id == activeDocumentID } ?? 0
@@ -1794,6 +1800,7 @@ final class EditorController: ObservableObject {
         guard let editor = scintillaView else { return }
         document.caretPosition = editor.caretPosition
         document.firstVisibleLine = editor.firstVisibleLine
+        document.pointerLines = editor.pointerLines.map { $0.intValue }
     }
 
     func findNext(_ query: String) {
@@ -1845,6 +1852,7 @@ struct NativeTextEditor: NSViewRepresentable {
         editor.keywordSets = mode.keywords
         editor.wordWrap = wordWrap
         editor.text = text
+        editor.pointerLines = document.pointerLines.map { NSNumber(value: $0) }
         context.coordinator.loadedDocumentID = document.id
         context.coordinator.lastText = text
         context.coordinator.restoreViewState(
@@ -1860,6 +1868,9 @@ struct NativeTextEditor: NSViewRepresentable {
                 modified: modified,
                 lineCount: lineCount
             )
+        }
+        editor.onPointerChange = { [weak coordinator = context.coordinator] lines in
+            coordinator?.pointersDidChange(lines)
         }
         controller.scintillaView = editor
         return editor
@@ -1877,6 +1888,7 @@ struct NativeTextEditor: NSViewRepresentable {
 
         if coordinator.loadedDocumentID != document.id {
             editor.text = text
+            editor.pointerLines = document.pointerLines.map { NSNumber(value: $0) }
             coordinator.lastText = text
             coordinator.loadedDocumentID = document.id
             coordinator.resetStatusCache()
@@ -1889,6 +1901,7 @@ struct NativeTextEditor: NSViewRepresentable {
             // The text changed somewhere other than the editor, such as a
             // restored session or an encoding change.
             editor.text = text
+            editor.pointerLines = document.pointerLines.map { NSNumber(value: $0) }
             coordinator.lastText = text
         }
 
@@ -1934,6 +1947,17 @@ struct NativeTextEditor: NSViewRepresentable {
                 guard let editor else { return }
                 editor.setCaretPosition(caretPosition)
                 editor.setFirstVisibleLine(firstVisibleLine)
+            }
+        }
+
+        func pointersDidChange(_ lines: [NSNumber]) {
+            guard !isUpdatingFromView else { return }
+            let values = lines.map { $0.intValue }
+            let document = parent.document
+            Task { @MainActor in
+                if document.pointerLines != values {
+                    document.pointerLines = values
+                }
             }
         }
 

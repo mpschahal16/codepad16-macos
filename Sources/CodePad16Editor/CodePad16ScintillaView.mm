@@ -7,9 +7,15 @@
 #include "ILexer.h"
 #include "Lexilla.h"
 
+/// Margin 0 holds the clickable pointer markers; margin 1 shows line numbers.
+static const int kPointerMargin = 0;
+static const int kLineNumberMargin = 1;
+static const int kPointerMarker = 0;
+
 @interface CodePad16ScintillaView () <ScintillaNotificationProtocol>
 @property(nonatomic, strong) ScintillaView *editor;
 @property(nonatomic, copy) NSString *configuredLexer;
+@property(nonatomic, strong, nullable) id gutterEventMonitor;
 @end
 
 @implementation CodePad16ScintillaView
@@ -66,9 +72,19 @@
 - (void)configureEditor {
     [self.editor setEditable:YES];
     [self.editor message:SCI_SETUNDOCOLLECTION wParam:1];
-    [self.editor message:SCI_SETMARGINTYPEN wParam:0 lParam:SC_MARGIN_NUMBER];
-    [self.editor message:SCI_SETMARGINWIDTHN wParam:0 lParam:46];
-    [self.editor message:SCI_SETMARGINSENSITIVEN wParam:0 lParam:0];
+
+    // Pointer markers sit in their own narrow margin so double-clicking the
+    // line numbers keeps Scintilla's normal single-click line selection.
+    [self.editor message:SCI_SETMARGINTYPEN wParam:kPointerMargin lParam:SC_MARGIN_SYMBOL];
+    [self.editor message:SCI_SETMARGINWIDTHN wParam:kPointerMargin lParam:20];
+    [self.editor message:SCI_SETMARGINSENSITIVEN wParam:kPointerMargin lParam:0];
+    [self.editor message:SCI_SETMARGINMASKN wParam:kPointerMargin lParam:(1 << kPointerMarker)];
+    [self.editor message:SCI_MARKERDEFINE wParam:kPointerMarker lParam:SC_MARK_ARROW];
+
+    [self.editor message:SCI_SETMARGINTYPEN wParam:kLineNumberMargin lParam:SC_MARGIN_NUMBER];
+    [self.editor message:SCI_SETMARGINWIDTHN wParam:kLineNumberMargin lParam:46];
+    [self.editor message:SCI_SETMARGINSENSITIVEN wParam:kLineNumberMargin lParam:0];
+
     [self.editor message:SCI_SETCARETLINEVISIBLE wParam:1];
     [self applyTheme];
 }
@@ -105,7 +121,12 @@
     [self.editor message:SCI_STYLESETBACK wParam:STYLE_LINENUMBER lParam:lineNumberBackground];
     [self.editor message:SCI_STYLESETFONT wParam:STYLE_LINENUMBER lParam:(sptr_t)"Menlo"];
     [self.editor message:SCI_STYLESETSIZE wParam:STYLE_LINENUMBER lParam:11];
-    [self.editor message:SCI_SETMARGINBACKN wParam:0 lParam:lineNumberBackground];
+    [self.editor message:SCI_SETMARGINBACKN wParam:kPointerMargin lParam:lineNumberBackground];
+    [self.editor message:SCI_SETMARGINBACKN wParam:kLineNumberMargin lParam:lineNumberBackground];
+
+    int pointerColor = dark ? 0xff9e4a : 0xcc6600;
+    [self.editor message:SCI_MARKERSETFORE wParam:kPointerMarker lParam:pointerColor];
+    [self.editor message:SCI_MARKERSETBACK wParam:kPointerMarker lParam:pointerColor];
 
     [self.editor message:SCI_SETCARETLINEBACK wParam:caretLineBackground];
     [self.editor message:SCI_SETCARETFORE wParam:caretForeground];
@@ -120,6 +141,100 @@
 - (void)viewDidChangeEffectiveAppearance {
     [super viewDidChangeEffectiveAppearance];
     [self applyTheme];
+}
+
+- (void)viewDidMoveToWindow {
+    [super viewDidMoveToWindow];
+    [self updateGutterEventMonitor];
+}
+
+- (void)dealloc {
+    if (_gutterEventMonitor) {
+        [NSEvent removeMonitor:_gutterEventMonitor];
+    }
+}
+
+/// AppKit does not report double clicks in a ruler view through Scintilla's
+/// margin notifications, so watch mouse downs while the editor is on screen.
+- (void)updateGutterEventMonitor {
+    if (self.window && !self.gutterEventMonitor) {
+        __weak CodePad16ScintillaView *weakSelf = self;
+        self.gutterEventMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskLeftMouseDown
+                                                                       handler:^NSEvent * _Nullable(NSEvent *event) {
+            [weakSelf handleGutterMouseDown:event];
+            return event;
+        }];
+    } else if (!self.window && self.gutterEventMonitor) {
+        [NSEvent removeMonitor:self.gutterEventMonitor];
+        self.gutterEventMonitor = nil;
+    }
+}
+
+- (void)handleGutterMouseDown:(NSEvent *)event {
+    if (event.clickCount != 2) return;
+    if (!self.window || event.window != self.window) return;
+
+    NSScrollView *scrollView = self.editor.scrollView;
+    NSRulerView *ruler = scrollView.verticalRulerView;
+    if (!ruler || ruler.window != self.window) return;
+
+    NSPoint point = [ruler convertPoint:event.locationInWindow fromView:nil];
+    if (!NSPointInRect(point, ruler.bounds)) return;
+
+    ScintillaView *editor = self.editor;
+    // The ruler is aligned with the visible text area, so its y coordinate is
+    // the coordinate Scintilla's point messages expect.
+    sptr_t position = (sptr_t)[editor message:SCI_POSITIONFROMPOINT wParam:0 lParam:(sptr_t)point.y];
+    if (position < 0) return;
+    NSInteger line = (NSInteger)[editor message:SCI_LINEFROMPOSITION wParam:(uptr_t)position];
+    NSInteger lineCount = (NSInteger)[editor message:SCI_GETLINECOUNT];
+    if (line < 0 || line >= lineCount) return;
+
+    // Ignore clicks in the empty space below the last line.
+    sptr_t length = (sptr_t)[editor message:SCI_GETLENGTH];
+    sptr_t endY = (sptr_t)[editor message:SCI_POINTYFROMPOSITION wParam:0 lParam:length];
+    sptr_t lineHeight = (sptr_t)[editor message:SCI_TEXTHEIGHT wParam:(uptr_t)line];
+    if ((sptr_t)point.y >= endY + lineHeight) return;
+
+    [self togglePointerAtLine:line + 1];
+}
+
+- (NSArray<NSNumber *> *)pointerLines {
+    NSMutableArray<NSNumber *> *lines = [NSMutableArray array];
+    NSInteger lineCount = (NSInteger)[self.editor message:SCI_GETLINECOUNT];
+    sptr_t line = (sptr_t)[self.editor message:SCI_MARKERNEXT wParam:0 lParam:(1 << kPointerMarker)];
+    while (line >= 0 && line < lineCount) {
+        [lines addObject:@(line + 1)];
+        line = (sptr_t)[self.editor message:SCI_MARKERNEXT wParam:(uptr_t)(line + 1) lParam:(1 << kPointerMarker)];
+    }
+    return lines;
+}
+
+- (void)setPointerLines:(NSArray<NSNumber *> *)pointerLines {
+    [self.editor message:SCI_MARKERDELETEALL wParam:kPointerMarker lParam:0];
+    NSInteger lineCount = (NSInteger)[self.editor message:SCI_GETLINECOUNT];
+    for (NSNumber *number in pointerLines) {
+        NSInteger line = number.integerValue - 1;
+        if (line >= 0 && line < lineCount) {
+            [self.editor message:SCI_MARKERADD wParam:(uptr_t)line lParam:kPointerMarker];
+        }
+    }
+}
+
+- (void)togglePointerAtLine:(NSInteger)line {
+    if (line < 1) return;
+    NSInteger index = line - 1;
+    if (index >= (NSInteger)[self.editor message:SCI_GETLINECOUNT]) return;
+
+    sptr_t mask = (sptr_t)[self.editor message:SCI_MARKERGET wParam:(uptr_t)index lParam:0];
+    if (mask & (1 << kPointerMarker)) {
+        [self.editor message:SCI_MARKERDELETE wParam:(uptr_t)index lParam:kPointerMarker];
+    } else {
+        [self.editor message:SCI_MARKERADD wParam:(uptr_t)index lParam:kPointerMarker];
+    }
+    if (self.onPointerChange) {
+        self.onPointerChange([self pointerLines]);
+    }
 }
 
 - (void)configureLexer {

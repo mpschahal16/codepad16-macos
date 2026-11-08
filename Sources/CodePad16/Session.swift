@@ -14,6 +14,8 @@ struct SessionState: Codable {
         var languageID: String
         var caretPosition: Int
         var firstVisibleLine: Int
+        /// Optional so sessions saved before gutter pointers existed still load.
+        var pointerLines: [Int]?
     }
 
     var documents: [Document]
