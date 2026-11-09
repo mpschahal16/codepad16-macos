@@ -18,7 +18,9 @@ static const int kPointerMarker = 0;
 @property(nonatomic, strong, nullable) id gutterEventMonitor;
 @end
 
-@implementation CodePad16ScintillaView
+@implementation CodePad16ScintillaView {
+    BOOL _textNeedsSync;
+}
 
 @synthesize wordWrap = _wordWrap;
 
@@ -47,9 +49,16 @@ static const int kPointerMarker = 0;
         [self.editor message:SCI_EMPTYUNDOBUFFER];
         [self.editor message:SCI_SETSAVEPOINT];
     }
+    _textNeedsSync = NO;
 }
 
 - (NSString *)text { return self.editor.string ?: @""; }
+
+- (BOOL)textNeedsSync { return _textNeedsSync; }
+
+- (void)clearTextNeedsSync { _textNeedsSync = NO; }
+
+- (void)markSaved { [self.editor message:SCI_SETSAVEPOINT]; }
 
 - (void)setLexerName:(NSString *)lexerName {
     _lexerName = [lexerName copy];
@@ -311,10 +320,11 @@ static const int kPointerMarker = 0;
     BOOL edited = NO;
     if (code == SCN_MODIFIED) {
         // Style, fold, and other bookkeeping notifications also arrive here;
-        // only copy the buffer when text was actually inserted or deleted.
+        // only flag the buffer when text was actually inserted or deleted.
         int textChange = SC_MOD_INSERTTEXT | SC_MOD_DELETETEXT;
         if ((notification->modificationType & textChange) == 0) return;
         edited = YES;
+        _textNeedsSync = YES;
     } else if (code != SCN_UPDATEUI && code != SCN_SAVEPOINTREACHED && code != SCN_SAVEPOINTLEFT) {
         return;
     }
@@ -324,9 +334,9 @@ static const int kPointerMarker = 0;
     NSInteger column = (NSInteger)[self.editor message:SCI_GETCOLUMN wParam:position] + 1;
     BOOL modified = [self.editor message:SCI_GETMODIFY] != 0;
     NSInteger lineCount = (NSInteger)[self.editor message:SCI_GETLINECOUNT];
-    // Passing nil for cursor-only updates avoids copying the whole document
-    // on every caret move, selection change, and scroll.
-    self.onChange(edited ? self.text : nil, line, column, modified, lineCount);
+    // Never copy the whole document here: the Swift layer pulls the buffer
+    // only when the view state is captured or the file is saved.
+    self.onChange(edited, line, column, modified, lineCount);
 }
 
 - (NSRange)selection {

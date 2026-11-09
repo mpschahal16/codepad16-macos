@@ -272,9 +272,7 @@ final class CodePad16AppDelegate: NSObject, NSApplicationDelegate {
 @MainActor
 final class EditorDocument: ObservableObject, Identifiable {
     let id = UUID()
-    @Published var text: String {
-        didSet { isDirty = text != savedText }
-    }
+    @Published var text: String
     @Published var isDirty = false
     @Published var languageMode: LanguageMode
     @Published var encoding: TextEncoding
@@ -290,7 +288,6 @@ final class EditorDocument: ObservableObject, Identifiable {
     /// Line count as reported by the editor, so the status bar does not have to
     /// rescan the whole document whenever the view updates.
     @Published var lineCount: Int
-    private var savedText: String
 
     init(
         text: String = "",
@@ -300,7 +297,6 @@ final class EditorDocument: ObservableObject, Identifiable {
         isPinned: Bool = false
     ) {
         self.text = text
-        self.savedText = text
         self.url = url
         self.encoding = encoding
         self.languageMode = languageMode ?? LanguageMode.detect(url: url)
@@ -324,7 +320,6 @@ final class EditorDocument: ObservableObject, Identifiable {
             url = newURL
             languageMode = LanguageMode.detect(url: newURL)
         }
-        savedText = text
         isDirty = false
     }
 
@@ -341,6 +336,12 @@ final class EditorStore: ObservableObject {
     @Published var activeDocumentID: UUID?
     /// Records the caret and scroll position of the visible document.
     var captureActiveDocument: (() -> Void)?
+    /// Moves the visible editor's save point forward after its file is written.
+    var markActiveDocumentSaved: (() -> Void)?
+
+    private var pendingSessionState: SessionState?
+    private var pendingSessionSave: Task<Void, Never>?
+    private let sessionWriteQueue = DispatchQueue(label: "CodePad16.session", qos: .utility)
 
     init() {
         let restored = Self.restoreSession()
@@ -404,6 +405,37 @@ final class EditorStore: ObservableObject {
 
     func saveSession() {
         captureActiveDocument?()
+        pendingSessionState = makeSessionState()
+        // Coalesce bursts of tab changes into one write. The state is captured
+        // immediately so a switch cannot race with the delayed write.
+        pendingSessionSave?.cancel()
+        pendingSessionSave = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard !Task.isCancelled else { return }
+            self?.writePendingSession()
+        }
+    }
+
+    /// Writes the latest session synchronously. Used when the app terminates,
+    /// where a delayed write might otherwise be lost.
+    func flushSession() {
+        pendingSessionSave?.cancel()
+        pendingSessionSave = nil
+        captureActiveDocument?()
+        pendingSessionState = nil
+        let state = makeSessionState()
+        sessionWriteQueue.sync { SessionStore.save(state) }
+    }
+
+    private func writePendingSession() {
+        pendingSessionSave = nil
+        guard let state = pendingSessionState else { return }
+        pendingSessionState = nil
+        // Encoding and disk I/O must not block typing or tab switches.
+        sessionWriteQueue.async { SessionStore.save(state) }
+    }
+
+    private func makeSessionState() -> SessionState {
         let states = documents.map { document in
             SessionState.Document(
                 url: document.url?.absoluteString,
@@ -418,7 +450,7 @@ final class EditorStore: ObservableObject {
             )
         }
         let index = documents.firstIndex { $0.id == activeDocumentID } ?? 0
-        SessionStore.save(SessionState(documents: states, activeIndex: index))
+        return SessionState(documents: states, activeIndex: index)
     }
 
     var activeDocument: EditorDocument? {
@@ -597,6 +629,8 @@ final class EditorStore: ObservableObject {
     /// document or changing whether it has unsaved changes.
     @discardableResult
     func saveCopyAs(_ document: EditorDocument) -> Bool {
+        // Include edits that have not been pulled into the model yet.
+        captureActiveDocument?()
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.item]
         panel.title = L10n.t("Save a Copy")
@@ -863,6 +897,8 @@ final class EditorStore: ObservableObject {
     }
 
     private func write(_ document: EditorDocument, to url: URL) -> Bool {
+        // Pull any pending edits out of the editor before encoding the buffer.
+        captureActiveDocument?()
         guard let data = document.encoding.encode(document.text) else {
             showError(
                 L10n.f("Could not save %@", url.lastPathComponent),
@@ -876,6 +912,9 @@ final class EditorStore: ObservableObject {
         do {
             try data.write(to: url, options: .atomic)
             document.markSaved(at: url)
+            if document.id == activeDocumentID {
+                markActiveDocumentSaved?()
+            }
             saveSession()
             return true
         } catch {
@@ -965,12 +1004,23 @@ struct CodePad16Window: View {
         .onAppear {
             appearance.apply()
             appDelegate.reopenWindow = { openWindow(id: "main") }
-            appDelegate.saveSession = { store.saveSession() }
+            // Termination must not wait for the debounced session write.
+            appDelegate.saveSession = { store.flushSession() }
             appDelegate.openFiles = { store.openExternalFiles($0) }
             store.captureActiveDocument = { [weak store] in
                 guard let store, let document = store.activeDocument else { return }
                 editorController.captureState(into: document)
             }
+            store.markActiveDocumentSaved = {
+                editorController.markSaved()
+            }
+        }
+        .onDisappear {
+            // Closing the window keeps the app running, so pull pending edits
+            // out of the editor before the view is torn down and persist them
+            // in case the process exits without a termination callback.
+            store.captureActiveDocument?()
+            store.saveSession()
         }
     }
 
@@ -1807,9 +1857,21 @@ final class EditorController: ObservableObject {
 
     func captureState(into document: EditorDocument) {
         guard let editor = scintillaView else { return }
+        // The editor only copies its buffer when it actually changed, so this
+        // stays cheap while typing and still captures edits before a save,
+        // tab switch, or session write.
+        if editor.textNeedsSync {
+            document.text = editor.text
+            editor.clearTextNeedsSync()
+        }
         document.caretPosition = editor.caretPosition
         document.firstVisibleLine = editor.firstVisibleLine
         document.pointerLines = editor.pointerLines.map { $0.intValue }
+    }
+
+    /// Marks the visible editor as matching its file on disk.
+    func markSaved() {
+        scintillaView?.markSaved()
     }
 
     func findNext(_ query: String) {
@@ -1869,9 +1931,9 @@ struct NativeTextEditor: NSViewRepresentable {
             firstVisibleLine: document.firstVisibleLine,
             in: editor
         )
-        editor.onChange = { [weak coordinator = context.coordinator] editedText, line, column, modified, lineCount in
+        editor.onChange = { [weak coordinator = context.coordinator] edited, line, column, modified, lineCount in
             coordinator?.editorDidChange(
-                text: editedText,
+                edited: edited,
                 line: line,
                 column: column,
                 modified: modified,
@@ -1931,6 +1993,11 @@ struct NativeTextEditor: NSViewRepresentable {
         private var lastLine = -1
         private var lastColumn = -1
         private var lastLineCount = -1
+        /// The dirty flag is only trusted after the first real edit. Loading a
+        /// restored document must not clear a dirty state that came from the
+        /// previous session.
+        private var tracksDirtyState = false
+        private var lastModified = false
 
         init(_ parent: NativeTextEditor) { self.parent = parent }
 
@@ -1940,6 +2007,8 @@ struct NativeTextEditor: NSViewRepresentable {
             lastLine = -1
             lastColumn = -1
             lastLineCount = -1
+            tracksDirtyState = false
+            lastModified = false
         }
 
         /// Applies the saved caret and scroll position. The scroll position only
@@ -1971,7 +2040,7 @@ struct NativeTextEditor: NSViewRepresentable {
         }
 
         func editorDidChange(
-            text editedText: String?,
+            edited: Bool,
             line: Int,
             column: Int,
             modified: Bool,
@@ -1980,25 +2049,33 @@ struct NativeTextEditor: NSViewRepresentable {
             // Notifications fired while loading a document (text or lexer assignment)
             // describe the old contents and must not overwrite the incoming document.
             guard !isUpdatingFromView else { return }
-            if let editedText, parent.text != editedText {
-                lastText = editedText
-                parent.text = editedText
-            }
+            if edited { tracksDirtyState = true }
             // Scintilla sends updates that change nothing, such as a repaint of
             // the same caret. Skip those instead of scheduling a hop per event.
-            guard line != lastLine || column != lastColumn || lineCount != lastLineCount else {
-                return
+            let statusChanged = line != lastLine || column != lastColumn || lineCount != lastLineCount
+            let dirtyChanged = tracksDirtyState && modified != lastModified
+            guard statusChanged || dirtyChanged else { return }
+
+            if statusChanged {
+                lastLine = line
+                lastColumn = column
+                lastLineCount = lineCount
             }
-            lastLine = line
-            lastColumn = column
-            lastLineCount = lineCount
+            if tracksDirtyState { lastModified = modified }
+
             let document = parent.document
             let controller = parent.controller
+            let trackDirty = tracksDirtyState
             Task { @MainActor in
-                if document.lineCount != lineCount {
-                    document.lineCount = lineCount
+                if trackDirty, document.isDirty != modified {
+                    document.isDirty = modified
                 }
-                controller.updateCursorPosition(line: line, column: column)
+                if statusChanged {
+                    if document.lineCount != lineCount {
+                        document.lineCount = lineCount
+                    }
+                    controller.updateCursorPosition(line: line, column: column)
+                }
             }
         }
     }

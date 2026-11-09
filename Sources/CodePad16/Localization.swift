@@ -35,6 +35,9 @@ final class Localization: ObservableObject {
     private let bundles: [String: Bundle]
     private let lock = NSLock()
     private var currentID: String
+    /// Resolved strings, keyed by language and lookup key. The bundle lookup is
+    /// only paid once per string instead of on every view update.
+    private var cache: [String: String] = [:]
 
     private init() {
         let codes = Self.availableCodes()
@@ -88,17 +91,27 @@ final class Localization: ObservableObject {
     func t(_ key: String) -> String {
         lock.lock()
         let language = currentID
+        let cacheKey = language + "\u{1F}" + key
+        if let cached = cache[cacheKey] {
+            lock.unlock()
+            return cached
+        }
         lock.unlock()
 
+        var result = key
         if let bundle = bundles[language] {
             let value = bundle.localizedString(forKey: key, value: nil, table: nil)
-            if value != key { return value }
+            if value != key { result = value }
         }
-        if language != "en", let english = bundles["en"] {
+        if result == key, language != "en", let english = bundles["en"] {
             let value = english.localizedString(forKey: key, value: nil, table: nil)
-            if value != key { return value }
+            if value != key { result = value }
         }
-        return key
+
+        lock.lock()
+        cache[cacheKey] = result
+        lock.unlock()
+        return result
     }
 
     /// Formats a localized string. Keep the same `%@`, `%lld`, and `%d`

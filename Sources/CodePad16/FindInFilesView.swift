@@ -353,6 +353,7 @@ final class FindInFilesModel: ObservableObject {
             ".git", ".build", "node_modules", "Pods", "DerivedData", "build", "dist", ".cache"
         ]
         let options: String.CompareOptions = matchCase ? [] : [.caseInsensitive]
+        let keySet = Set(keys)
         let maximumFileSize = 5 * 1024 * 1024
         let maximumMatches = 1000
         var files: [FileMatches] = []
@@ -361,7 +362,7 @@ final class FindInFilesModel: ObservableObject {
         for case let url as URL in enumerator {
             if total >= maximumMatches { break }
 
-            let values = try? url.resourceValues(forKeys: Set(keys))
+            let values = try? url.resourceValues(forKeys: keySet)
             if values?.isDirectory == true {
                 if skippedNames.contains(url.lastPathComponent) {
                     enumerator.skipDescendants()
@@ -378,28 +379,32 @@ final class FindInFilesModel: ObservableObject {
 
             var matches: [FileMatch] = []
             var lineNumber = 0
+            // Build the preview at most once per line, and only when it matches.
+            var linePreview: String?
             for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
                 lineNumber += 1
                 guard total < maximumMatches else { break }
 
-                let string = String(line)
-                var searchStart = string.startIndex
-                while searchStart < string.endIndex,
+                var searchStart = line.startIndex
+                while searchStart < line.endIndex,
                       total < maximumMatches,
-                      let range = string.range(
+                      let range = line.range(
                           of: term,
                           options: options,
-                          range: searchStart..<string.endIndex
+                          range: searchStart..<line.endIndex
                       ) {
-                    let preview = string.count > 240 ? String(string.prefix(240)) + "…" : string
-                    matches.append(FileMatch(
-                        line: lineNumber,
-                        text: preview.trimmingCharacters(in: .whitespaces)
-                    ))
+                    if linePreview == nil {
+                        let string = String(line)
+                        let shortened = string.count > 240
+                            ? String(string.prefix(240)) + "…"
+                            : string
+                        linePreview = shortened.trimmingCharacters(in: .whitespaces)
+                    }
+                    matches.append(FileMatch(line: lineNumber, text: linePreview ?? ""))
                     total += 1
                     searchStart = range.upperBound > range.lowerBound
                         ? range.upperBound
-                        : string.index(after: range.lowerBound)
+                        : line.index(after: range.lowerBound)
                 }
             }
 
