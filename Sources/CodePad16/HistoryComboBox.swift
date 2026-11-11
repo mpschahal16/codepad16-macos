@@ -7,6 +7,8 @@ struct HistoryComboBox: NSViewRepresentable {
     @Binding var text: String
     let items: [String]
     let placeholder: String
+    /// Increment this to move keyboard focus into the field and select its text.
+    var focusToken: Int = 0
     let onSubmit: () -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -31,6 +33,11 @@ struct HistoryComboBox: NSViewRepresentable {
     func updateNSView(_ combo: NSComboBox, context: Context) {
         context.coordinator.parent = self
 
+        if context.coordinator.lastFocusToken != focusToken {
+            context.coordinator.lastFocusToken = focusToken
+            focus(combo)
+        }
+
         if combo.placeholderString != placeholder {
             combo.placeholderString = placeholder
         }
@@ -48,9 +55,25 @@ struct HistoryComboBox: NSViewRepresentable {
         }
     }
 
+    /// Moves focus into the combo box once it is part of a window. When the bar
+    /// is first shown, the view can be created before SwiftUI attaches it, so
+    /// retry on the next run loop(s) instead of silently doing nothing.
+    private func focus(_ combo: NSComboBox, attempts: Int = 20) {
+        DispatchQueue.main.async { [weak combo] in
+            guard let combo else { return }
+            guard let window = combo.window else {
+                if attempts > 0 { self.focus(combo, attempts: attempts - 1) }
+                return
+            }
+            window.makeFirstResponder(combo)
+            combo.selectText(nil)
+        }
+    }
+
     final class Coordinator: NSObject, NSComboBoxDelegate {
         var parent: HistoryComboBox
         var isUpdating = false
+        var lastFocusToken = 0
 
         init(_ parent: HistoryComboBox) {
             self.parent = parent

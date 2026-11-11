@@ -945,6 +945,8 @@ struct CodePad16Window: View {
     @Environment(\.openWindow) private var openWindow
     @StateObject private var windowState = WindowState()
     @StateObject private var editorController = EditorController()
+    /// Incremented whenever the find bar opens, so the query field takes focus.
+    @State private var findFocusToken = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1196,6 +1198,7 @@ struct CodePad16Window: View {
         guard !windowState.findQuery.isEmpty else {
             // Without a query, show the find bar so there is something to search for.
             windowState.showFind = true
+            findFocusToken += 1
             return
         }
         windowState.recordSearch(windowState.findQuery)
@@ -1219,6 +1222,7 @@ struct CodePad16Window: View {
         windowState.showFind = true
         windowState.showReplace = true
         windowState.replaceStatus = ""
+        findFocusToken += 1
     }
 
     private func toggleFindBar() {
@@ -1226,6 +1230,7 @@ struct CodePad16Window: View {
             closeFindBar()
         } else {
             windowState.showFind = true
+            findFocusToken += 1
         }
     }
 
@@ -1338,6 +1343,7 @@ struct CodePad16Window: View {
                     text: $windowState.findQuery,
                     items: windowState.findHistory,
                     placeholder: localization.t("Find in document"),
+                    focusToken: findFocusToken,
                     onSubmit: { findInDocument(backwards: false) }
                 )
                 .frame(minWidth: 140, maxWidth: .infinity)
@@ -1352,6 +1358,9 @@ struct CodePad16Window: View {
                 Button {
                     windowState.showReplace.toggle()
                     windowState.replaceStatus = ""
+                    if windowState.showReplace {
+                        findFocusToken += 1
+                    }
                 } label: {
                     Image(systemName: "arrow.left.arrow.right")
                 }
