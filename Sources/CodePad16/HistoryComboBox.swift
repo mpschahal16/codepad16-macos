@@ -55,6 +55,17 @@ struct HistoryComboBox: NSViewRepresentable {
         }
     }
 
+    /// History entries that start with what has been typed so far, excluding an
+    /// exact repeat so the completion list only offers different text.
+    func matchingHistory(for query: String) -> [String] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return items }
+        return items.filter {
+            $0.localizedCaseInsensitiveCompare(trimmed) != .orderedSame
+                && $0.range(of: trimmed, options: [.anchored, .caseInsensitive]) != nil
+        }
+    }
+
     /// Moves focus into the combo box once it is part of a window. When the bar
     /// is first shown, the view can be created before SwiftUI attaches it, so
     /// retry on the next run loop(s) instead of silently doing nothing.
@@ -84,6 +95,22 @@ struct HistoryComboBox: NSViewRepresentable {
             isUpdating = true
             parent.text = combo.stringValue
             isUpdating = false
+            // Show the matching history entries in the standard completion list
+            // as the user types. Choosing none keeps the typed text untouched.
+            (combo.currentEditor() as? NSTextView)?.complete(nil)
+        }
+
+        func control(
+            _ control: NSControl,
+            textView: NSTextView,
+            completions words: [String],
+            forPartialWordRange charRange: NSRange,
+            indexOfSelectedItem index: UnsafeMutablePointer<Int>
+        ) -> [String] {
+            let matches = parent.matchingHistory(for: textView.string)
+            // -1 shows the list without replacing what the user typed.
+            index.pointee = -1
+            return matches
         }
 
         func comboBoxSelectionDidChange(_ notification: Notification) {
